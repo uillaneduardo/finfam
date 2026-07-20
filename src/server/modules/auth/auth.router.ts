@@ -99,6 +99,27 @@ router.post('/first-use-setup', rateLimit(5, 60 * 1000), async (req, res, next) 
       );
       const userId = userResult.insertId;
 
+      // 3. Insert Default Categories (Metadata) for the family
+      const defaultCategories = [
+        { name: 'Habitação e Moradia', type: 'expense' },
+        { name: 'Alimentação e Supermercado', type: 'expense' },
+        { name: 'Serviços de Tecnologia', type: 'expense' },
+        { name: 'Lazer e Entretenimento', type: 'expense' },
+        { name: 'Transporte e Mobilidade', type: 'expense' },
+        { name: 'Saúde e Cuidados', type: 'expense' },
+        { name: 'Educação', type: 'expense' },
+        { name: 'Rendimentos e Salários', type: 'income' },
+        { name: 'Outras Receitas', type: 'income' },
+        { name: 'Outras Despesas', type: 'expense' }
+      ];
+
+      for (const cat of defaultCategories) {
+        await runQuery(
+          'INSERT INTO `categories` (`family_id`, `name`, `type`, `status`) VALUES (?, ?, ?, "active")',
+          [familyId, cat.name, cat.type]
+        );
+      }
+
       return {
         userId,
         username: cleanUsername,
