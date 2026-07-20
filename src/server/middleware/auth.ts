@@ -5,6 +5,7 @@
 
 import { Request, Response, NextFunction } from 'express';
 import { SessionData, UserRole } from '../../shared/types';
+import { query } from '../database/db';
 
 // Extend Express Request type definitions to support session property
 declare global {
@@ -18,7 +19,7 @@ declare global {
 /**
  * Middleware to require authenticated session
  */
-export function requireAuth(req: Request, res: Response, next: NextFunction) {
+export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   const sessionCookie = req.signedCookies ? req.signedCookies.sid : null;
 
   if (!sessionCookie) {
@@ -40,7 +41,25 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
       });
     }
 
-    req.session = session;
+    // Validar novamente no banco se o usuário continua ativo
+    const [userRows] = await query('SELECT `id`, `family_id`, `role`, `status`, `name`, `username` FROM `users` WHERE `id` = ?', [session.userId]);
+    const user = userRows[0];
+
+    if (!user || user.status !== 'active') {
+      res.clearCookie('sid');
+      return res.status(401).json({
+        error: 'USER_INACTIVE_OR_DELETED',
+        message: 'O usuário associado a esta sessão foi desativado ou não existe.'
+      });
+    }
+
+    req.session = {
+      userId: user.id,
+      username: user.username,
+      name: user.name,
+      familyId: user.family_id,
+      role: user.role
+    };
     next();
   } catch (err) {
     res.clearCookie('sid');

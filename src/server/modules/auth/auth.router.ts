@@ -8,20 +8,9 @@ import bcrypt from 'bcryptjs';
 import { query, transaction } from '../../database/db';
 import { SessionData, UserRole, UserStatus } from '../../../shared/types';
 import { rateLimit, requireAuth } from '../../middleware/auth';
+import { firstUseSetupSchema, loginSchema } from '../../schemas/validation.schemas';
 
 const router = express.Router();
-
-/**
- * Helper to validate strong password rules (min 8 chars, uppercase, lowercase, number, symbol)
- */
-function isPasswordStrong(password: string): boolean {
-  if (password.length < 8) return false;
-  const hasUpperCase = /[A-Z]/.test(password);
-  const hasLowerCase = /[a-z]/.test(password);
-  const hasNumbers = /\d/.test(password);
-  const hasNongs = /[^A-Za-z0-9]/.test(password);
-  return hasUpperCase && hasLowerCase && hasNumbers && hasNongs;
-}
 
 /**
  * GET /api/auth/first-use-check
@@ -45,30 +34,15 @@ router.get('/first-use-check', async (req, res, next) => {
  * Criação da primeira família e do primeiro usuário administrador unificados
  */
 router.post('/first-use-setup', rateLimit(5, 60 * 1000), async (req, res, next) => {
-  const { familyName, adminName, adminUsername, adminPassword } = req.body;
-
-  if (!familyName || !adminName || !adminUsername || !adminPassword) {
+  const parsed = firstUseSetupSchema.safeParse(req.body);
+  if (!parsed.success) {
     return res.status(400).json({
-      error: 'MISSING_FIELDS',
-      message: 'Todos os campos são obrigatórios: nome da família, nome do administrador, nome de usuário e senha.'
+      error: 'VALIDATION_ERROR',
+      message: parsed.error.issues.map(err => err.message).join(', ')
     });
   }
 
-  // Sanitize username
-  const cleanUsername = adminUsername.trim().toLowerCase();
-  if (cleanUsername.length < 3) {
-    return res.status(400).json({
-      error: 'INVALID_USERNAME',
-      message: 'O nome de usuário deve conter pelo menos 3 caracteres.'
-    });
-  }
-
-  if (!isPasswordStrong(adminPassword)) {
-    return res.status(400).json({
-      error: 'WEAK_PASSWORD',
-      message: 'A senha do administrador deve conter no mínimo 8 caracteres, incluindo pelo menos uma letra maiúscula, uma letra minúscula, um número e um caractere especial.'
-    });
-  }
+  const { familyName, adminName, adminUsername, adminPassword } = parsed.data;
 
   try {
     // Check if any user already exists to prevent bypass
@@ -88,14 +62,14 @@ router.post('/first-use-setup', rateLimit(5, 60 * 1000), async (req, res, next) 
       // 1. Insert Family
       const familyResult = await runQuery(
         'INSERT INTO `families` (`name`) VALUES (?)',
-        [familyName.trim()]
+        [familyName]
       );
       const familyId = familyResult.insertId;
 
       // 2. Insert User Admin
       const userResult = await runQuery(
         'INSERT INTO `users` (`family_id`, `name`, `username`, `password_hash`, `role`, `status`) VALUES (?, ?, ?, ?, ?, ?)',
-        [familyId, adminName.trim(), cleanUsername, passwordHash, UserRole.ADMIN, UserStatus.ACTIVE]
+        [familyId, adminName, adminUsername, passwordHash, UserRole.ADMIN, UserStatus.ACTIVE]
       );
       const userId = userResult.insertId;
 
@@ -122,8 +96,8 @@ router.post('/first-use-setup', rateLimit(5, 60 * 1000), async (req, res, next) 
 
       return {
         userId,
-        username: cleanUsername,
-        name: adminName.trim(),
+        username: adminUsername,
+        name: adminName,
         familyId,
         role: UserRole.ADMIN
       };
@@ -159,34 +133,26 @@ router.post('/first-use-setup', rateLimit(5, 60 * 1000), async (req, res, next) 
  * Autenticação do usuário e criação de sessão HTTP-Only
  */
 router.post('/login', rateLimit(10, 60 * 1000), async (req, res, next) => {
-  const { username, password } = req.body;
-
-  if (!username || !password) {
+  const parsed = loginSchema.safeParse(req.body);
+  if (!parsed.success) {
     return res.status(400).json({
-      error: 'MISSING_FIELDS',
-      message: 'Por favor, informe o seu nome de usuário e a sua senha.'
+      error: 'VALIDATION_ERROR',
+      message: parsed.error.issues.map(err => err.message).join(', ')
     });
   }
 
-  const cleanUsername = username.trim().toLowerCase();
+  const { username, password } = parsed.data;
 
   try {
     // 1. Fetch user by username
-    const [users] = await query('SELECT * FROM `users` WHERE `username` = ? LIMIT 1', [cleanUsername]);
+    const [users] = await query('SELECT * FROM `users` WHERE `username` = ? LIMIT 1', [username]);
     const user = users[0];
 
-    if (!user) {
+    // 2. Return generic "Nome de usuário ou senha incorretos." error if not found or inactive for security
+    if (!user || user.status !== UserStatus.ACTIVE) {
       return res.status(401).json({
         error: 'INVALID_CREDENTIALS',
         message: 'Nome de usuário ou senha incorretos.'
-      });
-    }
-
-    // 2. Check if user is active
-    if (user.status !== UserStatus.ACTIVE) {
-      return res.status(403).json({
-        error: 'USER_INACTIVE',
-        message: 'Esta conta de usuário foi desativada pelo administrador da família. Entre em contato para liberação.'
       });
     }
 

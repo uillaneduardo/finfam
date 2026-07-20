@@ -23,17 +23,37 @@ import usersRouter from './src/server/modules/users/users.router';
 // Load environment variables
 dotenv.config();
 
+// Validate required environment variables on startup
+const requiredEnvVars = ['DB_HOST', 'DB_PORT', 'DB_USER', 'DB_PASSWORD', 'DB_NAME'];
+const missingEnvVars = requiredEnvVars.filter(v => !process.env[v]);
+if (missingEnvVars.length > 0) {
+  console.error(`❌ ERRO CRÍTICO: Variáveis de ambiente obrigatórias ausentes: ${missingEnvVars.join(', ')}`);
+  console.error('Por favor, certifique-se de configurar estas variáveis no arquivo .env antes de inicializar o servidor.');
+  process.exit(1);
+}
+
+const isProduction = process.env.NODE_ENV === 'production';
+const sessionSecret = process.env.SESSION_SECRET;
+
+if (isProduction) {
+  if (!sessionSecret || sessionSecret === 'altere_este_segredo_por_um_hash_aleatorio_e_seguro_em_producao' || sessionSecret === 'fallback-secret-for-signing-cookies-finfam') {
+    console.error('❌ ERRO CRÍTICO DE SEGURANÇA: O SESSION_SECRET padrão ou ausente é proibido em ambiente de produção!');
+    console.error('Configure um SESSION_SECRET seguro e exclusivo no seu arquivo .env para iniciar a aplicação.');
+    process.exit(1);
+  }
+}
+
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = parseInt(process.env.PORT || '3000', 10);
 
   // JSON and URL-encoded request body parsing
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
   // Initialize Cookie Parser with safe Session Secret
-  const sessionSecret = process.env.SESSION_SECRET || 'fallback-secret-for-signing-cookies-finfam';
-  app.use(cookieParser(sessionSecret));
+  const secretToUse = sessionSecret || 'fallback-secret-for-signing-cookies-finfam';
+  app.use(cookieParser(secretToUse));
 
   // Initialize Database Pool (MySQL or automatic JSON local file fallback)
   await initDb();

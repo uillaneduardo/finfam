@@ -7,6 +7,8 @@ import express from 'express';
 import { query, transaction } from '../../database/db';
 import { requireAuth } from '../../middleware/auth';
 import { ProjectStatus, ProjectOperationType } from '../../../shared/types';
+import { projectSchema, aporteSchema, resgateSchema } from '../../schemas/validation.schemas';
+import { validateRelatedEntities } from '../../utils/family.validator';
 
 const router = express.Router();
 
@@ -60,19 +62,36 @@ router.get('/', requireAuth, async (req, res, next) => {
 router.post('/', requireAuth, async (req, res, next) => {
   const familyId = req.session!.familyId;
   const userId = req.session!.userId;
-  const { type, name, description, target_amount, deadline, responsible_user_id, notes } = req.body;
 
-  if (!type || !name || !target_amount || !responsible_user_id) {
+  // 1. Zod validation
+  const parsed = projectSchema.safeParse(req.body);
+  if (!parsed.success) {
     return res.status(400).json({
-      error: 'MISSING_FIELDS',
-      message: 'Tipo de meta, nome do projeto, valor alvo e usuário responsável são obrigatórios.'
+      error: 'VALIDATION_ERROR',
+      message: parsed.error.issues.map(err => err.message).join(', ')
     });
   }
 
+  const { type, name, description, target_amount, deadline, responsible_user_id, notes } = parsed.data;
+
   try {
+    // 2. Cross-family check
+    await validateRelatedEntities(familyId, { responsible_user_id });
+
     const [result] = await query(
       'INSERT INTO `projects` (`family_id`, `type`, `name`, `description`, `target_amount`, `deadline`, `responsible_user_id`, `status`, `notes`, `created_by_id`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [familyId, type, name.trim(), description || null, Number(target_amount), deadline || null, Number(responsible_user_id), ProjectStatus.ACTIVE, notes || null, userId]
+      [
+        familyId,
+        type,
+        name,
+        description,
+        target_amount,
+        deadline || null,
+        responsible_user_id,
+        ProjectStatus.ACTIVE,
+        notes || null,
+        userId
+      ]
     );
 
     res.status(201).json({
@@ -86,6 +105,79 @@ router.post('/', requireAuth, async (req, res, next) => {
 });
 
 /**
+ * Helper to fetch and lock an account, calculating its nominal and free balances.
+ */
+async function getAccountBalancesForUpdate(runQuery: any, accountId: number, familyId: number) {
+  // 1. Select account for update to avoid race conditions
+  const [accountRows] = await runQuery(
+    'SELECT `initial_balance`, `status` FROM `accounts` WHERE `id` = ? AND `family_id` = ? FOR UPDATE',
+    [accountId, familyId]
+  );
+  if (accountRows.length === 0) {
+    const error: any = new Error('Conta real não encontrada.');
+    error.statusCode = 404;
+    error.code = 'NOT_FOUND';
+    throw error;
+  }
+  const account = accountRows[0];
+  const initialBalance = Number(account.initial_balance);
+
+  // 2. Sum income
+  const [incomeRows] = await runQuery(
+    'SELECT COALESCE(SUM(`amount`), 0) as total FROM `transactions` WHERE `family_id` = ? AND `type` = "income" AND `destination_account_id` = ?',
+    [familyId, accountId]
+  );
+  const incomeTotal = Number(incomeRows[0]?.total || 0);
+
+  // 3. Sum expense
+  const [expenseRows] = await runQuery(
+    'SELECT COALESCE(SUM(`amount`), 0) as total FROM `transactions` WHERE `family_id` = ? AND `type` = "expense" AND `source_account_id` = ?',
+    [familyId, accountId]
+  );
+  const expenseTotal = Number(expenseRows[0]?.total || 0);
+
+  // 4. Sum transfer to
+  const [transferToRows] = await runQuery(
+    'SELECT COALESCE(SUM(`amount`), 0) as total FROM `transactions` WHERE `family_id` = ? AND `type` = "transfer" AND `destination_account_id` = ?',
+    [familyId, accountId]
+  );
+  const transferToTotal = Number(transferToRows[0]?.total || 0);
+
+  // 5. Sum transfer from
+  const [transferFromRows] = await runQuery(
+    'SELECT COALESCE(SUM(`amount`), 0) as total FROM `transactions` WHERE `family_id` = ? AND `type` = "transfer" AND `source_account_id` = ?',
+    [familyId, accountId]
+  );
+  const transferFromTotal = Number(transferFromRows[0]?.total || 0);
+
+  const nominalBalance = initialBalance + incomeTotal - expenseTotal + transferToTotal - transferFromTotal;
+
+  // 6. Sum project deposits on this account
+  const [depositRows] = await runQuery(
+    'SELECT COALESCE(SUM(`amount`), 0) as total FROM `project_operations` WHERE `family_id` = ? AND `operation_type` = "deposit" AND `source_account_id` = ?',
+    [familyId, accountId]
+  );
+  const depositTotal = Number(depositRows[0]?.total || 0);
+
+  // 7. Sum project withdrawals on this account
+  const [withdrawRows] = await runQuery(
+    'SELECT COALESCE(SUM(`amount`), 0) as total FROM `project_operations` WHERE `family_id` = ? AND `operation_type` = "withdrawal" AND `destination_account_id` = ?',
+    [familyId, accountId]
+  );
+  const withdrawTotal = Number(withdrawRows[0]?.total || 0);
+
+  const reservedBalance = depositTotal - withdrawTotal;
+  const freeBalance = nominalBalance - reservedBalance;
+
+  return {
+    nominalBalance,
+    reservedBalance,
+    freeBalance,
+    status: account.status
+  };
+}
+
+/**
  * POST /api/projects/:id/deposit
  * Realiza aporte financeiro reservando saldo de uma conta real da família
  */
@@ -93,27 +185,63 @@ router.post('/:id/deposit', requireAuth, async (req, res, next) => {
   const familyId = req.session!.familyId;
   const userId = req.session!.userId;
   const projectId = Number(req.params.id);
-  const { amount, source_account_id, operation_date, notes } = req.body;
 
-  if (!amount || !source_account_id || !operation_date) {
+  // 1. Zod validation
+  const parsed = aporteSchema.safeParse({
+    ...req.body,
+    project_id: projectId
+  });
+  if (!parsed.success) {
     return res.status(400).json({
-      error: 'MISSING_FIELDS',
-      message: 'Valor do aporte, conta de origem e data da operação são obrigatórios.'
+      error: 'VALIDATION_ERROR',
+      message: parsed.error.issues.map(err => err.message).join(', ')
     });
   }
 
-  try {
-    // 1. Verify project exists
-    const [projects] = await query('SELECT * FROM `projects` WHERE `id` = ? AND `family_id` = ? LIMIT 1', [projectId, familyId]);
-    if (projects.length === 0) {
-      return res.status(404).json({ error: 'NOT_FOUND', message: 'Caixinha de reserva não encontrada.' });
-    }
+  const { amount, source_account_id, operation_date, notes } = parsed.data;
 
-    // 2. Perform Deposit within ACID transaction
+  try {
+    // 2. Perform within a single atomic ACID transaction
     await transaction(async (runQuery) => {
+      // a. Verify project exists, belongs to family and is ACTIVE
+      const [projectRows] = await runQuery(
+        'SELECT `status` FROM `projects` WHERE `id` = ? AND `family_id` = ? FOR UPDATE',
+        [projectId, familyId]
+      );
+      if (projectRows.length === 0) {
+        const error: any = new Error('Reserva/projeto de caixinha não encontrado.');
+        error.statusCode = 404;
+        error.code = 'NOT_FOUND';
+        throw error;
+      }
+      if (projectRows[0].status !== ProjectStatus.ACTIVE) {
+        const error: any = new Error('Operações não são permitidas em projetos/reservas pausados, concluídos ou cancelados.');
+        error.statusCode = 400;
+        error.code = 'INACTIVE_PROJECT';
+        throw error;
+      }
+
+      // b. Verify account status and balances
+      const accountData = await getAccountBalancesForUpdate(runQuery, source_account_id, familyId);
+      if (accountData.status !== 'active') {
+        const error: any = new Error('Não é possível realizar aportes a partir de uma conta inativa.');
+        error.statusCode = 400;
+        error.code = 'INACTIVE_ACCOUNT';
+        throw error;
+      }
+
+      // c. Check if free balance is sufficient
+      if (amount > accountData.freeBalance) {
+        const error: any = new Error(`Saldo livre insuficiente nesta conta para realizar este aporte. Saldo livre disponível: R$ ${accountData.freeBalance.toFixed(2)}.`);
+        error.statusCode = 400;
+        error.code = 'INSUFFICIENT_FREE_BALANCE';
+        throw error;
+      }
+
+      // d. Insert deposit operation
       await runQuery(
         'INSERT INTO `project_operations` (`family_id`, `project_id`, `operation_type`, `amount`, `source_account_id`, `destination_account_id`, `operation_date`, `notes`, `created_by_id`) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)',
-        [familyId, projectId, ProjectOperationType.DEPOSIT, Number(amount), Number(source_account_id), operation_date, notes || null, userId]
+        [familyId, projectId, ProjectOperationType.DEPOSIT, amount, source_account_id, operation_date, notes || null, userId]
       );
     });
 
@@ -121,7 +249,13 @@ router.post('/:id/deposit', requireAuth, async (req, res, next) => {
       success: true,
       message: 'Aporte de reserva realizado com sucesso. O saldo correspondente desta conta real foi reservado.'
     });
-  } catch (err) {
+  } catch (err: any) {
+    if (err.code === 'NOT_FOUND') {
+      return res.status(404).json({ error: 'NOT_FOUND', message: err.message });
+    }
+    if (err.statusCode === 400) {
+      return res.status(400).json({ error: err.code || 'BAD_REQUEST', message: err.message });
+    }
     next(err);
   }
 });
@@ -134,27 +268,78 @@ router.post('/:id/withdraw', requireAuth, async (req, res, next) => {
   const familyId = req.session!.familyId;
   const userId = req.session!.userId;
   const projectId = Number(req.params.id);
-  const { amount, destination_account_id, operation_date, notes } = req.body;
 
-  if (!amount || !destination_account_id || !operation_date) {
+  // 1. Zod validation
+  const parsed = resgateSchema.safeParse({
+    ...req.body,
+    project_id: projectId
+  });
+  if (!parsed.success) {
     return res.status(400).json({
-      error: 'MISSING_FIELDS',
-      message: 'Valor do resgate, conta de destino e data da operação são obrigatórios.'
+      error: 'VALIDATION_ERROR',
+      message: parsed.error.issues.map(err => err.message).join(', ')
     });
   }
 
-  try {
-    // 1. Verify project exists
-    const [projects] = await query('SELECT * FROM `projects` WHERE `id` = ? AND `family_id` = ? LIMIT 1', [projectId, familyId]);
-    if (projects.length === 0) {
-      return res.status(404).json({ error: 'NOT_FOUND', message: 'Caixinha de reserva não encontrada.' });
-    }
+  const { amount, destination_account_id, operation_date, notes } = parsed.data;
 
-    // 2. Perform Withdrawal within transaction
+  try {
+    // 2. Perform within a single atomic ACID transaction
     await transaction(async (runQuery) => {
+      // a. Verify project exists, belongs to family and is ACTIVE
+      const [projectRows] = await runQuery(
+        'SELECT `status` FROM `projects` WHERE `id` = ? AND `family_id` = ? FOR UPDATE',
+        [projectId, familyId]
+      );
+      if (projectRows.length === 0) {
+        const error: any = new Error('Reserva/projeto de caixinha não encontrado.');
+        error.statusCode = 404;
+        error.code = 'NOT_FOUND';
+        throw error;
+      }
+      if (projectRows[0].status !== ProjectStatus.ACTIVE) {
+        const error: any = new Error('Operações não são permitidas em projetos/reservas pausados, concluídos ou cancelados.');
+        error.statusCode = 400;
+        error.code = 'INACTIVE_PROJECT';
+        throw error;
+      }
+
+      // b. Verify account status
+      const accountData = await getAccountBalancesForUpdate(runQuery, destination_account_id, familyId);
+      if (accountData.status !== 'active') {
+        const error: any = new Error('Não é possível realizar resgates para uma conta inativa.');
+        error.statusCode = 400;
+        error.code = 'INACTIVE_ACCOUNT';
+        throw error;
+      }
+
+      // c. Calculate how much specifically this project has reserved on this specific account
+      const [depositRows] = await runQuery(
+        'SELECT COALESCE(SUM(`amount`), 0) as total FROM `project_operations` WHERE `family_id` = ? AND `project_id` = ? AND `operation_type` = "deposit" AND `source_account_id` = ?',
+        [familyId, projectId, destination_account_id]
+      );
+      const depositTotal = Number(depositRows[0]?.total || 0);
+
+      const [withdrawRows] = await runQuery(
+        'SELECT COALESCE(SUM(`amount`), 0) as total FROM `project_operations` WHERE `family_id` = ? AND `project_id` = ? AND `operation_type` = "withdrawal" AND `destination_account_id` = ?',
+        [familyId, projectId, destination_account_id]
+      );
+      const withdrawTotal = Number(withdrawRows[0]?.total || 0);
+
+      const currentReservedOnAccount = depositTotal - withdrawTotal;
+
+      // d. Validate that withdrawal amount does not exceed reserved amount on this specific account
+      if (amount > currentReservedOnAccount) {
+        const error: any = new Error(`Resgate superior ao saldo reservado especificamente nesta conta financeira. Valor atualmente reservado nesta conta: R$ ${currentReservedOnAccount.toFixed(2)}.`);
+        error.statusCode = 400;
+        error.code = 'INSUFFICIENT_RESERVED_BALANCE';
+        throw error;
+      }
+
+      // e. Insert withdrawal operation
       await runQuery(
         'INSERT INTO `project_operations` (`family_id`, `project_id`, `operation_type`, `amount`, `source_account_id`, `destination_account_id`, `operation_date`, `notes`, `created_by_id`) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)',
-        [familyId, projectId, ProjectOperationType.WITHDRAWAL, Number(amount), Number(destination_account_id), operation_date, notes || null, userId]
+        [familyId, projectId, ProjectOperationType.WITHDRAWAL, amount, destination_account_id, operation_date, notes || null, userId]
       );
     });
 
@@ -162,7 +347,13 @@ router.post('/:id/withdraw', requireAuth, async (req, res, next) => {
       success: true,
       message: 'Resgate de reserva efetuado com sucesso. O valor foi creditado de volta ao saldo livre da sua conta real.'
     });
-  } catch (err) {
+  } catch (err: any) {
+    if (err.code === 'NOT_FOUND') {
+      return res.status(404).json({ error: 'NOT_FOUND', message: err.message });
+    }
+    if (err.statusCode === 400) {
+      return res.status(400).json({ error: err.code || 'BAD_REQUEST', message: err.message });
+    }
     next(err);
   }
 });

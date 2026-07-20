@@ -8,6 +8,9 @@ import bcrypt from 'bcryptjs';
 import { query } from '../../database/db';
 import { requireAuth, requireAdmin } from '../../middleware/auth';
 import { UserRole, UserStatus } from '../../../shared/types';
+import { createUserSchema } from '../../schemas/validation.schemas';
+import { checkFamilyOwnership } from '../../utils/family.validator';
+import { z } from 'zod';
 
 const router = express.Router();
 
@@ -32,20 +35,20 @@ router.get('/', requireAuth, async (req, res, next) => {
  */
 router.post('/', requireAdmin, async (req, res, next) => {
   const familyId = req.session!.familyId;
-  const { name, username, password, role } = req.body;
 
-  if (!name || !username || !password || !role) {
+  const parsed = createUserSchema.safeParse(req.body);
+  if (!parsed.success) {
     return res.status(400).json({
-      error: 'MISSING_FIELDS',
-      message: 'Nome, nome de usuário, senha e papel do membro são obrigatórios.'
+      error: 'VALIDATION_ERROR',
+      message: parsed.error.issues.map(err => err.message).join(', ')
     });
   }
 
-  const cleanUsername = username.trim().toLowerCase();
+  const { name, username, password, role } = parsed.data;
 
   try {
     // Check if username already exists globally
-    const [existing] = await query('SELECT `id` FROM `users` WHERE `username` = ? LIMIT 1', [cleanUsername]);
+    const [existing] = await query('SELECT `id` FROM `users` WHERE `username` = ? LIMIT 1', [username]);
     if (existing.length > 0) {
       return res.status(400).json({
         error: 'USERNAME_TAKEN',
@@ -57,7 +60,7 @@ router.post('/', requireAdmin, async (req, res, next) => {
 
     const [result] = await query(
       'INSERT INTO `users` (`family_id`, `name`, `username`, `password_hash`, `role`, `status`) VALUES (?, ?, ?, ?, ?, ?)',
-      [familyId, name.trim(), cleanUsername, passwordHash, role, UserStatus.ACTIVE]
+      [familyId, name, username, passwordHash, role, UserStatus.ACTIVE]
     );
 
     res.status(201).json({
@@ -77,7 +80,6 @@ router.post('/', requireAdmin, async (req, res, next) => {
 router.post('/:id/status', requireAdmin, async (req, res, next) => {
   const familyId = req.session!.familyId;
   const targetUserId = Number(req.params.id);
-  const { status } = req.body;
 
   if (targetUserId === req.session!.userId) {
     return res.status(400).json({
@@ -86,22 +88,24 @@ router.post('/:id/status', requireAdmin, async (req, res, next) => {
     });
   }
 
-  if (status !== UserStatus.ACTIVE && status !== UserStatus.INACTIVE) {
-    return res.status(400).json({
-      error: 'INVALID_STATUS',
+  const parsed = z.object({
+    status: z.enum([UserStatus.ACTIVE, UserStatus.INACTIVE], {
       message: 'O status deve ser active ou inactive.'
+    })
+  }).safeParse(req.body);
+
+  if (!parsed.success) {
+    return res.status(400).json({
+      error: 'VALIDATION_ERROR',
+      message: parsed.error.issues.map(err => err.message).join(', ')
     });
   }
 
+  const { status } = parsed.data;
+
   try {
     // Verify target user belongs to the same family
-    const [users] = await query('SELECT `id` FROM `users` WHERE `id` = ? AND `family_id` = ? LIMIT 1', [targetUserId, familyId]);
-    if (users.length === 0) {
-      return res.status(404).json({
-        error: 'NOT_FOUND',
-        message: 'Membro de família não encontrado.'
-      });
-    }
+    await checkFamilyOwnership('users', targetUserId, familyId);
 
     const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
     await query('UPDATE `users` SET `status` = ?, `updated_at` = ? WHERE `id` = ?', [status, now, targetUserId]);

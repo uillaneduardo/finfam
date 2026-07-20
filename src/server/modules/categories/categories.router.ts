@@ -6,6 +6,7 @@
 import express from 'express';
 import { query } from '../../database/db';
 import { requireAuth } from '../../middleware/auth';
+import { categorySchema } from '../../schemas/validation.schemas';
 
 const router = express.Router();
 
@@ -30,19 +31,21 @@ router.get('/', requireAuth, async (req, res, next) => {
  */
 router.post('/', requireAuth, async (req, res, next) => {
   const familyId = req.session!.familyId;
-  const { name, type } = req.body;
 
-  if (!name || !type) {
+  const parsed = categorySchema.safeParse(req.body);
+  if (!parsed.success) {
     return res.status(400).json({
-      error: 'MISSING_FIELDS',
-      message: 'Nome da categoria e tipo (income/expense) são obrigatórios.'
+      error: 'VALIDATION_ERROR',
+      message: parsed.error.issues.map(err => err.message).join(', ')
     });
   }
+
+  const { name, type } = parsed.data;
 
   try {
     const [result] = await query(
       'INSERT INTO `categories` (`family_id`, `name`, `type`, `status`) VALUES (?, ?, ?, "active")',
-      [familyId, name.trim(), type]
+      [familyId, name, type]
     );
 
     res.status(201).json({

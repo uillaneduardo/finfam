@@ -1,78 +1,112 @@
-# FinFam - Finanças Familiares Compartilhadas
+# FinFam — Finanças Familiares Compartilhadas
 
-O **FinFam** é uma aplicação web de organização financeira familiar compartilhada, destinada ao registro e acompanhamento de contas, entradas, saídas, compromissos financeiros, reservas e projetos. Este projeto foi desenhado sob a perspectiva de manter a simplicidade, a segurança e a colaboração necessárias para a gestão saudável das finanças de um lar.
+O **FinFam** é uma aplicação web robusta, segura e moderna para organização e gestão financeira familiar compartilhada. Ela centraliza o registro e o acompanhamento de contas, lançamentos de entradas, saídas, transferências, compromissos futuros, além de reservas e metas financeiras ("caixinhas"), diferenciando claramente o saldo total do saldo livre para gastos diários.
 
-Atualmente, o projeto encontra-se em sua **fase de estruturação técnica inicial, com documentação, modelagem de banco e scaffold da aplicação já criados**.
-
-É importante destacar que:
-* **Modelagem Física Inicial:** O banco de dados MySQL foi inicialmente modelado (`migrations/001_initial_schema.sql`) e possui uma carga de sementes inicial (`seeds/001_initial_seed.sql`) estruturada para testes de consistência matemática.
-* **Frontend:** A interface frontend se encontra atualmente como um scaffold inicial pronto para desenvolvimento.
-* **Backend Funcional:** A lógica de backend funcional (API, rotas de negócio, controladores, conexão ao banco) ainda não está concluída e precisa ser implementada.
-* **Fluxos de Negócio:** Os fluxos operacionais completos (lançamentos, quitações, aportes, login) ainda não foram codificados.
-* **Documentação como Referência:** A documentação detalhada continua sendo o guia e a referência principal de todo o desenvolvimento do FinFam.
+Este projeto é desenvolvido como um **Monólito Modular** altamente otimizado para produção, combinando a integridade transacional forte do MySQL e a segurança avançada do Express e do Zod no backend com a interatividade moderna do React, Tailwind CSS e TypeScript no frontend.
 
 ---
 
-## 🎯 Objetivo do Produto
-O FinFam resolve a falta de transparência e o descontrole no orçamento familiar. Ele atua como um centralizador onde todos os membros da família podem registrar e acompanhar a saúde financeira comum, ajudando a responder a perguntas fundamentais como:
-* Quanto dinheiro a família possui no total e onde ele está guardado?
-* Qual é o saldo livre para gastos cotidianos após deduzir as reservas e projetos?
-* Quais compromissos estão vencendo hoje, nesta semana ou estão atrasados?
-* Quanto falta para atingir a meta de um projeto (ex: comprar uma geladeira ou formar a reserva de emergência)?
-* Quem realizou cada movimentação ou é responsável por determinado pagamento?
+## 🎯 Funcionalidades Principais do Sistema
+
+1. **Autenticação Segura & Gestão Familiar (Multi-tenant)**
+   - Fluxo unificado de configuração inicial (primeiro uso) para criar a família e o primeiro usuário administrador.
+   - Login seguro utilizando sessões com cookie assinado HTTP-Only, rotação e expiração.
+   - Middlewares avançados de autenticação, checagem ao vivo do status do usuário no banco de dados, rate limiters e controle de permissões por papel (`admin` e `member`).
+   - Gestão de membros da família (ativação/desativação de usuários com proteção contra auto-desativação).
+
+2. **Isolamento de Dados Estrito (Zero Leakage)**
+   - Validador centralizado (`checkFamilyOwnership` e `validateRelatedEntities`) que assegura que todas as leituras, escritas e referências a entidades pertençam estritamente à família associada à sessão atual. Qualquer tentativa de acesso cruzado resulta em erros neutros de "não encontrado" (404), mitigando riscos de ID enumeration.
+
+3. **Contas & Movimentações Financeiras**
+   - Cadastro e gerenciamento de contas (corrente, poupança, carteira digital, dinheiro vivo).
+   - Lançamentos de **Entradas (Receitas)**, **Saídas (Despesas)** e **Transferências entre Contas** com transações ACID no MySQL.
+   - Atualização automática de saldos nominal e livre por conta.
+   - Prevenção ativa contra cliques duplos (janela de idempotência de 3 segundos).
+
+4. **Compromissos Financeiros futuros (A Pagar / A Receber)**
+   - Agendamento de compromissos futuros com cálculo automático de status de atraso com base no fuso horário `America/Fortaleza`.
+   - Fluxo de **Quitação Assistida**: pagar ou receber um compromisso de forma transacional, gerando a movimentação financeira correspondente de forma atômica no banco de dados e atualizando o status do compromisso.
+
+5. **Reservas & Caixinhas (Metas Compartilhadas)**
+   - Separação lógica de fundos em metas de poupança (emergência, sonhos, aquisições).
+   - Fluxo atômico de **Aportes (Depósitos)** e **Resgates (Retiradas)** com conciliação automática de saldo nas contas reais e proteção contra saldo insuficiente ou caixinhas inativas.
+   - Bloqueio pessimista de registros (`FOR UPDATE`) para prevenir condições de corrida sob alta concorrência.
+
+6. **Validação & Estabilidade de Dados (Zod & TypeScript)**
+   - Schemas de validação Zod centralizados para todas as entradas e contratos da API.
+   - Rejeição absoluta de valores inválidos, `NaN`, `Infinity`, nulos inadequados, zero ou valores negativos nas operações financeiras.
+   - Suporte a arredondamento e validação estrita de até duas casas decimais.
 
 ---
 
-## 🚀 Escopo do MVP (Módulos Principais)
-O Produto Mínimo Viável (MVP) do FinFam contempla as seguintes capacidades essenciais:
-1. **Multi-inquilinato (Famílias):** Suporte a isolamento completo de dados entre diferentes famílias.
-2. **Contas Financeiras:** Cadastro e gestão de onde o dinheiro está guardado (contas correntes, poupanças, caixinhas, espécie).
-3. **Movimentações:** Registro de Entradas (receitas), Saídas (despesas) e Transferências entre contas da mesma família.
-4. **Contatos Financeiros:** Gestão de terceiros associados a pagamentos e recebimentos (amigos, empresas, concessionárias de serviços).
-5. **Compromissos Financeiros:** Agendamento de contas a pagar e a receber com controle automático de atrasos e quitação transacional direta.
-6. **Reservas e Projetos:** Separação do dinheiro das contas para metas específicas, diferenciando o Saldo Total do Saldo Livre.
-7. **Auditoria e Filtros:** Rastreamento básico de criação/alteração de registros e filtros dinâmicos por período, responsável e tipo.
+## 🏗️ Arquitetura do Projeto
 
-*Nota: Recursos como emissão de faturas de cartão de crédito, parcelamentos automáticos complexos, conciliação bancária via OFX/API e notificações automatizadas estão explicitamente fora do escopo do MVP.*
+O FinFam utiliza uma arquitetura monolítica modular e limpa:
+- **Frontend:** React, Vite, TypeScript, Tailwind CSS, Lucide Icons.
+- **Backend:** Node.js, Express, TypeScript, Zod.
+- **Banco de Dados:** MySQL 8+ com suporte nativo a transações InnoDB e locks pessimistas.
+- **Suíte de Testes:** Vitest para testes automatizados unitários e de integração de segurança/validação.
 
 ---
 
-## 🛠️ Tecnologias Planejadas
-O FinFam é concebido como um **Monólito Modular** de alta performance e baixo custo de manutenção:
-* **Frontend:** React + TypeScript + Tailwind CSS (para um design limpo, de alto contraste e responsivo).
-* **Backend:** Node.js + Express + TypeScript (API REST interna segura).
-* **Banco de Dados:** MySQL (banco de dados relacional para consistência transacional forte e integridade referencial).
+## 🛠️ Scripts e Comandos
+
+Todos os scripts necessários para o gerenciamento, testes e compilação do sistema estão centralizados no `package.json`:
+
+- **Desenvolvimento:**
+  ```bash
+  npm run dev
+  ```
+  Inicia o servidor backend Express (carregando o Vite como middleware em desenvolvimento) na porta `3000`.
+
+- **Build de Produção:**
+  ```bash
+  npm run build
+  ```
+  Gera a compilação estática do frontend React (`dist/`) e empacota o backend TypeScript em um arquivo CommonJS independente (`dist/server.cjs`) usando esbuild.
+
+- **Inicialização em Produção:**
+  ```bash
+  npm run start
+  ```
+  Roda a aplicação compilada em modo de produção.
+
+- **Qualidade de Código e Linter:**
+  ```bash
+  npm run lint
+  ```
+  Verifica a consistência estática e tipagem do TypeScript (`tsc --noEmit`).
+
+- **Testes Automatizados (Vitest):**
+  ```bash
+  npm run test
+  ```
+  Executa a suíte completa de testes unitários e de integração para esquemas de validação Zod e isolamento familiar.
+
+- **Controle de Banco de Dados (Migrations e Seeds):**
+  ```bash
+  # Executa as migrations pendentes para estruturar o banco
+  npm run db:migrate
+
+  # Verifica o status atual de execução das migrations
+  npm run db:status
+
+  # Executa a semente de dados iniciais (seed de desenvolvimento/teste)
+  npm run db:seed
+
+  # Reinicia o banco de dados (reseta e roda migrations do zero)
+  npm run db:reset
+  ```
 
 ---
 
-## 📂 Estrutura da Documentação
-A especificação completa do FinFam está organizada na pasta `docs/` e pode ser navegada através dos links relativos abaixo:
+## 🔒 Segurança e Robustez Implementadas
 
-1. [**01. Visão do Produto**](docs/01-visao-do-produto.md) — Conceito geral, problemas a resolver, público-alvo e proposição de valor.
-2. [**02. Escopo do MVP e Limitações**](docs/02-escopo-do-mvp.md) — O que está incluído no MVP e o que foi deixado de fora do escopo inicial.
-3. [**03. Requisitos Funcionais**](docs/03-requisitos-funcionais.md) — Lista completa de todos os requisitos funcionais mapeados por identificadores (RF-001 a RF-XXX).
-4. [**04. Requisitos Não Funcionais**](docs/04-requisitos-nao-funcionais.md) — Atributos de qualidade como segurança, desempenho, integridade transacional e fuso horário.
-5. [**05. Regras de Negócio**](docs/05-regras-de-negocio.md) — Regras de cálculo de saldos, regras de atraso, movimentações permitidas e restrições financeiras.
-6. [**06. Modelo de Dados**](docs/06-modelo-de-dados.md) — Dicionário de entidades em inglês, atributos, chaves, índices, tipos conceituais e integridade.
-7. [**07. Fluxos da Aplicação**](docs/07-fluxos-da-aplicacao.md) — Passo a passo lógico das interações de criação, autenticação, transações financeiras e resgates de reservas.
-8. [**08. Autenticação e Segurança**](docs/08-autenticacao-e-seguranca.md) — Política de senhas, sessões via cookie seguro, isolamento estrito de dados e prevenção a ataques.
-9. [**09. Critérios de Aceitação**](docs/09-criterios-de-aceitacao.md) — Cenários BDD (Dado que... Quando... Então...) para validação de fluxos críticos de negócio.
-10. [**10. Arquitetura Planejada**](docs/10-arquitetura.md) — Padrão monolítico modular, estrutura de arquivos recomendada e fluxo de dados.
-11. [**11. Roadmap de Desenvolvimento**](docs/11-roadmap.md) — Fases de execução planejadas, da infraestrutura básica à entrega das consultas.
-12. [**12. Glossário de Termos**](docs/12-glossario.md) — Dicionário unificado de conceitos do FinFam em português.
-13. [**13. Decisões Técnicas (ADRs)**](docs/13-decisoes-tecnicas.md) — Registro de decisões arquiteturais importantes e suas respectivas justificativas.
-14. [**14. Migrations e Carga de Sementes**](docs/14-migrations-e-seed.md) — Planejamento das migrations estruturais, controle de versão do banco e a massa de dados (seed) de teste e homologação.
-15. [**15. Diretrizes de Interface e Usabilidade**](docs/15-interface-e-usabilidade.md) — Princípios de design, navegação conceitual, registros rápidos, feedbacks de processamento, compatibilidade mobile/desktop e diretrizes de acessibilidade básica.
-
+- **Idempotência de Transações:** Proteção contra envio duplo de movimentações utilizando uma janela temporal de 3 segundos para lançamentos com a mesma conta, valor e data.
+- **Locks de Concorrência:** Locks pessimistas (`SELECT ... FOR UPDATE`) aplicados durante depósitos, retiradas e quitações assistidas para prevenir condições de corrida matemática.
+- **Erros de Validação Limpos:** Centralização de tratamento de erros no Express, retornando códigos de erro claros (`VALIDATION_ERROR`, `NOT_FOUND`, `UNAUTHORIZED`, etc.) de forma amigável ao usuário.
+- **Fuso Horário Nativo:** Tratamento correto de datas locais via fuso horário fixo brasileiro (`America/Fortaleza`), independentemente da localização física do container de execução.
 
 ---
 
-## 📈 Próximos Passos
-1. **Validação da Especificação:** Revisão detalhada desta documentação junto aos stakeholders para congelar o escopo do MVP.
-2. **Modelagem Física Inicial Criada:** Os scripts de DDL inicial (`migrations/001_initial_schema.sql`) e sementes de teste de consistência (`seeds/001_initial_seed.sql`) foram criados, restando ainda sua validação e execução em ambientes integrados.
-3. **Setup do Repositório de Código:** Estruturação das pastas de backend e frontend no monólito (scaffold React pronto).
-4. **Implementação da Etapa 1 (Pendente):** Desenvolvimento da autenticação segura, criação de família no primeiro uso, backend funcional e fluxos financeiros principais, que ainda precisam ser codificados.
-
----
-
-*O projeto FinFam está sob licença Apache-2.0. Consulte o time de arquitetura para maiores informações de governança.*
+*O projeto FinFam está sob licença Apache-2.0. Consulte o time de engenharia e arquitetura para mais informações.*

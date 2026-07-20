@@ -6,6 +6,7 @@
 import express from 'express';
 import { query } from '../../database/db';
 import { requireAuth } from '../../middleware/auth';
+import { accountSchema } from '../../schemas/validation.schemas';
 
 const router = express.Router();
 
@@ -84,20 +85,21 @@ router.get('/', requireAuth, async (req, res, next) => {
 router.post('/', requireAuth, async (req, res, next) => {
   const familyId = req.session!.familyId;
   const userId = req.session!.userId;
-  const { name, institution, type, holder_name, account_identifier, pix_key, initial_balance, notes } = req.body;
 
-  if (!name || !institution || !type || !holder_name) {
+  const parsed = accountSchema.safeParse(req.body);
+  if (!parsed.success) {
     return res.status(400).json({
-      error: 'MISSING_FIELDS',
-      message: 'Nome, instituição, tipo de conta e titular são obrigatórios.'
+      error: 'VALIDATION_ERROR',
+      message: parsed.error.issues.map(err => err.message).join(', ')
     });
   }
 
+  const { name, institution, type, holder_name, account_identifier, pix_key, initial_balance, notes } = parsed.data;
+
   try {
-    const balance = Number(initial_balance || 0);
     const [result] = await query(
       'INSERT INTO `accounts` (`family_id`, `name`, `institution`, `type`, `holder_name`, `account_identifier`, `pix_key`, `initial_balance`, `status`, `notes`, `created_by_id`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [familyId, name, institution, type, holder_name, account_identifier || null, pix_key || null, balance, 'active', notes || null, userId]
+      [familyId, name, institution, type, holder_name, account_identifier || null, pix_key || null, initial_balance, 'active', notes || null, userId]
     );
 
     res.status(201).json({

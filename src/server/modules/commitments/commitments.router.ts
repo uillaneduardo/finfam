@@ -7,8 +7,34 @@ import express from 'express';
 import { query, transaction } from '../../database/db';
 import { requireAuth } from '../../middleware/auth';
 import { CommitmentStatus } from '../../../shared/types';
+import { commitmentSchema, quitaçãoSchema } from '../../schemas/validation.schemas';
+import { validateRelatedEntities } from '../../utils/family.validator';
 
 const router = express.Router();
+
+/**
+ * Helper to get the current date in the America/Fortaleza timezone
+ */
+function getTodayFortaleza(): string {
+  const formatter = new Intl.DateTimeFormat('sv-SE', {
+    timeZone: 'America/Fortaleza',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  });
+  return formatter.format(new Date());
+}
+
+/**
+ * Helper to calculate the difference in days (overdue count)
+ */
+function getDaysOverdue(dueDateStr: string, todayStr: string): number {
+  const due = new Date(dueDateStr + 'T00:00:00');
+  const today = new Date(todayStr + 'T00:00:00');
+  const diffTime = today.getTime() - due.getTime();
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  return diffDays > 0 ? diffDays : 0;
+}
 
 /**
  * GET /api/commitments
@@ -19,7 +45,31 @@ router.get('/', requireAuth, async (req, res, next) => {
 
   try {
     const [rows] = await query('SELECT * FROM `commitments` WHERE `family_id` = ? ORDER BY `due_date` ASC', [familyId]);
-    res.json(rows);
+    
+    const todayStr = getTodayFortaleza();
+    
+    const enhancedRows = rows.map(item => {
+      let daysOverdue = 0;
+      let label = item.status === 'pending' ? 'Pendente' : 'Pago';
+      
+      if (item.status === 'pending') {
+        const overdue = getDaysOverdue(item.due_date, todayStr);
+        if (overdue > 0) {
+          daysOverdue = overdue;
+          label = `Atrasado há ${overdue} ${overdue === 1 ? 'dia' : 'dias'}`;
+        } else if (item.due_date === todayStr) {
+          label = 'Vence Hoje';
+        }
+      }
+      
+      return {
+        ...item,
+        days_overdue: daysOverdue,
+        status_label: label
+      };
+    });
+
+    res.json(enhancedRows);
   } catch (err) {
     next(err);
   }
@@ -33,6 +83,15 @@ router.post('/', requireAuth, async (req, res, next) => {
   const familyId = req.session!.familyId;
   const userId = req.session!.userId;
 
+  // 1. Zod validation
+  const parsed = commitmentSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({
+      error: 'VALIDATION_ERROR',
+      message: parsed.error.issues.map(err => err.message).join(', ')
+    });
+  }
+
   const {
     type,
     description,
@@ -44,28 +103,29 @@ router.post('/', requireAuth, async (req, res, next) => {
     category_id,
     recurrence_type,
     notes
-  } = req.body;
-
-  if (!type || !description || !estimated_amount || !due_date || !responsible_user_id) {
-    return res.status(400).json({
-      error: 'MISSING_FIELDS',
-      message: 'Tipo de compromisso, descrição, valor previsto, data de vencimento e responsável são obrigatórios.'
-    });
-  }
+  } = parsed.data;
 
   try {
+    // 2. Cross-family checks
+    await validateRelatedEntities(familyId, {
+      contact_id,
+      responsible_user_id,
+      estimated_account_id,
+      category_id
+    });
+
     const [result] = await query(
       'INSERT INTO `commitments` (`family_id`, `type`, `description`, `estimated_amount`, `due_date`, `contact_id`, `responsible_user_id`, `estimated_account_id`, `category_id`, `status`, `recurrence_type`, `notes`, `created_by_id`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       [
         familyId,
         type,
-        description.trim(),
-        Number(estimated_amount),
+        description,
+        estimated_amount,
         due_date,
-        contact_id ? Number(contact_id) : null,
-        Number(responsible_user_id),
-        estimated_account_id ? Number(estimated_account_id) : null,
-        category_id ? Number(category_id) : null,
+        contact_id || null,
+        responsible_user_id,
+        estimated_account_id || null,
+        category_id || null,
         CommitmentStatus.PENDING,
         recurrence_type || 'none',
         notes || null,
@@ -91,18 +151,36 @@ router.post('/:id/pay', requireAuth, async (req, res, next) => {
   const familyId = req.session!.familyId;
   const userId = req.session!.userId;
   const commitmentId = Number(req.params.id);
-  const { actual_amount, actual_date, account_id, notes } = req.body;
 
-  if (!actual_amount || !actual_date || !account_id) {
+  // 1. Zod validation
+  const parsed = quitaçãoSchema.safeParse(req.body);
+  if (!parsed.success) {
     return res.status(400).json({
-      error: 'MISSING_FIELDS',
-      message: 'Valor pago/recebido, data da liquidação e conta financeira utilizada são obrigatórios.'
+      error: 'VALIDATION_ERROR',
+      message: parsed.error.issues.map(err => err.message).join(', ')
     });
   }
 
+  const { actual_amount, actual_date, account_id } = parsed.data;
+
   try {
-    // Fetch commitment
-    const [commitments] = await query('SELECT * FROM `commitments` WHERE `id` = ? AND `family_id` = ? LIMIT 1', [commitmentId, familyId]);
+    // 2. Validate that the account belongs to the family
+    await validateRelatedEntities(familyId, { account_id });
+
+    // 3. Verify that the account is active
+    const [accRows] = await query('SELECT `status` FROM `accounts` WHERE `id` = ?', [account_id]);
+    if (accRows[0]?.status !== 'active') {
+      return res.status(400).json({
+        error: 'INACTIVE_ACCOUNT',
+        message: 'Lançamentos não são permitidos em uma conta financeira inativa.'
+      });
+    }
+
+    // 4. Fetch commitment
+    const [commitments] = await query(
+      'SELECT * FROM `commitments` WHERE `id` = ? AND `family_id` = ? LIMIT 1',
+      [commitmentId, familyId]
+    );
     const commitment = commitments[0];
 
     if (!commitment) {
@@ -121,35 +199,36 @@ router.post('/:id/pay', requireAuth, async (req, res, next) => {
 
     // Determine transaction direction
     const txType = commitment.type === 'to_pay' ? 'expense' : 'income';
-    const sourceAcc = commitment.type === 'to_pay' ? Number(account_id) : null;
-    const destAcc = commitment.type === 'to_receive' ? Number(account_id) : null;
+    const sourceAcc = commitment.type === 'to_pay' ? account_id : null;
+    const destAcc = commitment.type === 'to_receive' ? account_id : null;
 
+    // 5. Execute quitação atomically
     await transaction(async (runQuery) => {
-      // 1. Insert actual transaction matching the payment
+      // Create actual real-life transaction linked to the commitment
       const txResult = await runQuery(
         'INSERT INTO `transactions` (`family_id`, `type`, `description`, `amount`, `transaction_date`, `source_account_id`, `destination_account_id`, `responsible_user_id`, `category_id`, `contact_id`, `notes`, `created_by_id`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [
           familyId,
           txType,
           `Quitação: ${commitment.description}`,
-          Number(actual_amount),
+          actual_amount,
           actual_date,
           sourceAcc,
           destAcc,
           commitment.responsible_user_id,
           commitment.category_id,
           commitment.contact_id,
-          notes || commitment.notes,
+          commitment.notes,
           userId
         ]
       );
       const transactionId = txResult.insertId;
 
-      // 2. Mark commitment as paid
+      // Update commitment
       const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
       await runQuery(
         'UPDATE `commitments` SET `status` = ?, `actual_amount` = ?, `actual_date` = ?, `transaction_id` = ?, `updated_at` = ? WHERE `id` = ?',
-        [CommitmentStatus.PAID, Number(actual_amount), actual_date, transactionId, now, commitmentId]
+        [CommitmentStatus.PAID, actual_amount, actual_date, transactionId, now, commitmentId]
       );
     });
 
