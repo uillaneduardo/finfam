@@ -1,0 +1,6 @@
+{
+  "name": "FinFam",
+  "description": "Documentação e planejamento do projeto FinFam - Finanças Familiares Compartilhadas.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
