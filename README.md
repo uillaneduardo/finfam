@@ -10,8 +10,8 @@ Este projeto é desenvolvido como um **Monólito Modular** altamente otimizado p
 
 1. **Autenticação Segura & Gestão Familiar (Multi-tenant)**
    - Fluxo unificado de configuração inicial (primeiro uso) para criar a família e o primeiro usuário administrador.
-   - Login seguro utilizando sessões com cookie assinado HTTP-Only, rotação e expiração.
-   - Middlewares avançados de autenticação, checagem ao vivo do status do usuário no banco de dados, rate limiters e controle de permissões por papel (`admin` e `member`).
+   - Login seguro utilizando cookies de sessão assinados HTTP-Only.
+   - Middlewares de autenticação, checagem ao vivo do status do usuário no banco de dados, rate limiters e controle de permissões por papel (`admin` e `member`).
    - Gestão de membros da família (ativação/desativação de usuários com proteção contra auto-desativação).
 
 2. **Isolamento de Dados Estrito (Zero Leakage)**
@@ -21,21 +21,26 @@ Este projeto é desenvolvido como um **Monólito Modular** altamente otimizado p
    - Cadastro e gerenciamento de contas (corrente, poupança, carteira digital, dinheiro vivo).
    - Lançamentos de **Entradas (Receitas)**, **Saídas (Despesas)** e **Transferências entre Contas** com transações ACID no MySQL.
    - Atualização automática de saldos nominal e livre por conta.
-   - Prevenção ativa contra cliques duplos (janela de idempotência de 3 segundos).
+   - **Garantia de Idempotência**: Prevenção ativa e confiável contra transações duplicadas utilizando `idempotency_key` gerada pelo frontend combinada com índice único por família e chave no banco de dados, retornando o resultado anterior imediatamente caso uma chave repetida seja enviada.
 
 4. **Compromissos Financeiros futuros (A Pagar / A Receber)**
-   - Agendamento de compromissos futuros com cálculo automático de status de atraso com base no fuso horário `America/Fortaleza`.
-   - Fluxo de **Quitação Assistida**: pagar ou receber um compromisso de forma transacional, gerando a movimentação financeira correspondente de forma atômica no banco de dados e atualizando o status do compromisso.
+   - Agendamento de compromissos futuros com cálculo automático de status de atraso com base no fuso horário local (configurado pela variável `TIMEZONE`, ex: `America/Fortaleza`).
+   - Fluxo de **Quitação Assistida Atômica**:
+     - Abertura de transação ACID antes de consultar o compromisso.
+     - Bloqueio pessimista via `SELECT ... FOR UPDATE` no compromisso específico da família.
+     - Validação estrita do status do compromisso (somente `pending`) e de saldos da conta envolvida na mesma transação.
+     - Lançamento atômico da movimentação financeira correspondente e atualização do compromisso utilizando filtro específico de ID, Family ID e status `pending`.
+     - Confirmação imediata de atualização de exatamente uma linha, prevenindo de forma definitiva que duas quitações paralelas gerem movimentações duplicadas.
 
 5. **Reservas & Caixinhas (Metas Compartilhadas)**
    - Separação lógica de fundos em metas de poupança (emergência, sonhos, aquisições).
    - Fluxo atômico de **Aportes (Depósitos)** e **Resgates (Retiradas)** com conciliação automática de saldo nas contas reais e proteção contra saldo insuficiente ou caixinhas inativas.
-   - Bloqueio pessimista de registros (`FOR UPDATE`) para prevenir condições de corrida sob alta concorrência.
+   - Bloqueio pessimista de registros (`FOR UPDATE`) para prevenir condições de corrida matemática sob alta concorrência.
 
 6. **Validação & Estabilidade de Dados (Zod & TypeScript)**
    - Schemas de validação Zod centralizados para todas as entradas e contratos da API.
    - Rejeição absoluta de valores inválidos, `NaN`, `Infinity`, nulos inadequados, zero ou valores negativos nas operações financeiras.
-   - Suporte a arredondamento e validação estrita de até duas casas decimais.
+   - Suporte a arredondamento e tratamento estrito de valores monetários como centavos de inteiros no backend para evitar erros de ponto flutuante.
 
 ---
 
@@ -45,67 +50,89 @@ O FinFam utiliza uma arquitetura monolítica modular e limpa:
 - **Frontend:** React, Vite, TypeScript, Tailwind CSS, Lucide Icons.
 - **Backend:** Node.js, Express, TypeScript, Zod.
 - **Banco de Dados:** MySQL 8+ com suporte nativo a transações InnoDB e locks pessimistas.
-- **Suíte de Testes:** Vitest para testes automatizados unitários e de integração de segurança/validação.
+- **Suíte de Testes:** Vitest + Supertest para testes automatizados unitários e testes reais de integração de ponta a ponta sem mocks.
 
 ---
 
-## 🛠️ Scripts e Comandos
+## 💻 Como Configurar e Executar (Passo a Passo)
 
-Todos os scripts necessários para o gerenciamento, testes e compilação do sistema estão centralizados no `package.json`:
+### 1. Pré-requisitos
+- Node.js (versão 18+)
+- MySQL (versão 8+)
 
-- **Desenvolvimento:**
-  ```bash
-  npm run dev
-  ```
-  Inicia o servidor backend Express (carregando o Vite como middleware em desenvolvimento) na porta `3000`.
+### 2. Configuração do Ambiente (.env)
+Crie um arquivo `.env` na raiz do projeto com as suas credenciais e configurações locais:
+```env
+# Configurações do Servidor
+PORT=3000
+SESSION_SECRET=uma_chave_secreta_e_longa_aqui
+TIMEZONE=America/Fortaleza
+
+# Configurações do Banco de Dados MySQL
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_USER=seu_usuario_mysql
+DB_PASSWORD=sua_senha_mysql
+DB_NAME=finfam_db
+```
+
+### 3. Instalação de Dependências
+Instale todos os pacotes necessários:
+```bash
+npm install
+```
+
+### 4. Criação e Migração do Banco de Dados
+O FinFam possui um gerenciador de banco nativo para manter sua estrutura sempre atualizada:
+```bash
+# Executa as migrations pendentes para estruturar as tabelas
+npm run db:migrate
+
+# Executa as sementes (seeds) de dados para desenvolvimento e testes
+npm run db:seed
+```
+
+### 5. Execução em Modo de Desenvolvimento
+Inicie o servidor com hot-reload ativo:
+```bash
+npm run dev
+```
+A aplicação estará acessível em `http://localhost:3000`.
+
+---
+
+## 🛠️ Scripts e Comandos Adicionais
 
 - **Build de Produção:**
   ```bash
   npm run build
   ```
-  Gera a compilação estática do frontend React (`dist/`) e empacota o backend TypeScript em um arquivo CommonJS independente (`dist/server.cjs`) usando esbuild.
+  Compila o frontend estático (`dist/`) e empacota o backend TypeScript em um bundle independente (`dist/server.cjs`) usando esbuild.
 
 - **Inicialização em Produção:**
   ```bash
   npm run start
   ```
-  Roda a aplicação compilada em modo de produção.
 
 - **Qualidade de Código e Linter:**
   ```bash
   npm run lint
   ```
-  Verifica a consistência estática e tipagem do TypeScript (`tsc --noEmit`).
 
 - **Testes Automatizados (Vitest):**
   ```bash
+  # Executa toda a suíte de testes unitários e de integração de ponta a ponta
   npm run test
   ```
-  Executa a suíte completa de testes unitários e de integração para esquemas de validação Zod e isolamento familiar.
 
-- **Controle de Banco de Dados (Migrations e Seeds):**
+- **Utilitários do Banco de Dados:**
   ```bash
-  # Executa as migrations pendentes para estruturar o banco
-  npm run db:migrate
-
-  # Verifica o status atual de execução das migrations
+  # Verifica o status atual das migrations
   npm run db:status
 
-  # Executa a semente de dados iniciais (seed de desenvolvimento/teste)
-  npm run db:seed
-
-  # Reinicia o banco de dados (reseta e roda migrations do zero)
+  # Reinicia o banco de dados (reseta e roda migrations/seeds do zero)
   npm run db:reset
   ```
-
----
-
-## 🔒 Segurança e Robustez Implementadas
-
-- **Idempotência de Transações:** Proteção contra envio duplo de movimentações utilizando uma janela temporal de 3 segundos para lançamentos com a mesma conta, valor e data.
-- **Locks de Concorrência:** Locks pessimistas (`SELECT ... FOR UPDATE`) aplicados durante depósitos, retiradas e quitações assistidas para prevenir condições de corrida matemática.
-- **Erros de Validação Limpos:** Centralização de tratamento de erros no Express, retornando códigos de erro claros (`VALIDATION_ERROR`, `NOT_FOUND`, `UNAUTHORIZED`, etc.) de forma amigável ao usuário.
-- **Fuso Horário Nativo:** Tratamento correto de datas locais via fuso horário fixo brasileiro (`America/Fortaleza`), independentemente da localização física do container de execução.
 
 ---
 

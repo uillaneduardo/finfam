@@ -13,16 +13,30 @@ import { validateRelatedEntities } from '../../utils/family.validator';
 const router = express.Router();
 
 /**
- * Helper to get the current date in the America/Fortaleza timezone
+ * Helper to get the current date in the system timezone
  */
 function getTodayFortaleza(): string {
+  const systemTimezone = process.env.TIMEZONE || 'America/Fortaleza';
   const formatter = new Intl.DateTimeFormat('sv-SE', {
-    timeZone: 'America/Fortaleza',
+    timeZone: systemTimezone,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit'
   });
   return formatter.format(new Date());
+}
+
+/**
+ * Helper to safely format a date from DB (Date object or string) to a clean YYYY-MM-DD format
+ */
+function formatDateString(dateVal: any): string {
+  if (dateVal instanceof Date) {
+    const year = dateVal.getFullYear();
+    const month = String(dateVal.getMonth() + 1).padStart(2, '0');
+    const day = String(dateVal.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+  return String(dateVal).substring(0, 10);
 }
 
 /**
@@ -52,18 +66,21 @@ router.get('/', requireAuth, async (req, res, next) => {
       let daysOverdue = 0;
       let label = item.status === 'pending' ? 'Pendente' : 'Pago';
       
+      const dueDateStr = formatDateString(item.due_date);
+      
       if (item.status === 'pending') {
-        const overdue = getDaysOverdue(item.due_date, todayStr);
+        const overdue = getDaysOverdue(dueDateStr, todayStr);
         if (overdue > 0) {
           daysOverdue = overdue;
           label = `Atrasado há ${overdue} ${overdue === 1 ? 'dia' : 'dias'}`;
-        } else if (item.due_date === todayStr) {
+        } else if (dueDateStr === todayStr) {
           label = 'Vence Hoje';
         }
       }
       
       return {
         ...item,
+        due_date: dueDateStr,
         days_overdue: daysOverdue,
         status_label: label
       };
@@ -164,47 +181,68 @@ router.post('/:id/pay', requireAuth, async (req, res, next) => {
   const { actual_amount, actual_date, account_id } = parsed.data;
 
   try {
-    // 2. Validate that the account belongs to the family
-    await validateRelatedEntities(familyId, { account_id });
+    const result = await transaction(async (runQuery) => {
+      // 2. Fetch commitment with SELECT ... FOR UPDATE to lock the row
+      const commitments = await runQuery(
+        'SELECT * FROM `commitments` WHERE `id` = ? AND `family_id` = ? FOR UPDATE',
+        [commitmentId, familyId]
+      );
+      const commitment = commitments[0];
 
-    // 3. Verify that the account is active
-    const [accRows] = await query('SELECT `status` FROM `accounts` WHERE `id` = ?', [account_id]);
-    if (accRows[0]?.status !== 'active') {
-      return res.status(400).json({
-        error: 'INACTIVE_ACCOUNT',
-        message: 'Lançamentos não são permitidos em uma conta financeira inativa.'
-      });
-    }
+      if (!commitment) {
+        return {
+          status: 404,
+          body: {
+            error: 'NOT_FOUND',
+            message: 'Compromisso financeiro não encontrado.'
+          }
+        };
+      }
 
-    // 4. Fetch commitment
-    const [commitments] = await query(
-      'SELECT * FROM `commitments` WHERE `id` = ? AND `family_id` = ? LIMIT 1',
-      [commitmentId, familyId]
-    );
-    const commitment = commitments[0];
+      // 3. Confirm that status is pending inside the transaction
+      if (commitment.status !== CommitmentStatus.PENDING) {
+        return {
+          status: 400,
+          body: {
+            error: 'ALREADY_PAID',
+            message: 'Este compromisso já se encontra liquidado/pago.'
+          }
+        };
+      }
 
-    if (!commitment) {
-      return res.status(404).json({
-        error: 'NOT_FOUND',
-        message: 'Compromisso financeiro não encontrado.'
-      });
-    }
+      // 4. Validate account inside the same transaction using FOR UPDATE to lock
+      const accounts = await runQuery(
+        'SELECT * FROM `accounts` WHERE `id` = ? AND `family_id` = ? FOR UPDATE',
+        [account_id, familyId]
+      );
+      const account = accounts[0];
 
-    if (commitment.status === CommitmentStatus.PAID) {
-      return res.status(400).json({
-        error: 'ALREADY_PAID',
-        message: 'Este compromisso já se encontra liquidado/pago.'
-      });
-    }
+      if (!account) {
+        return {
+          status: 404,
+          body: {
+            error: 'NOT_FOUND',
+            message: 'Conta financeira não encontrada.'
+          }
+        };
+      }
 
-    // Determine transaction direction
-    const txType = commitment.type === 'to_pay' ? 'expense' : 'income';
-    const sourceAcc = commitment.type === 'to_pay' ? account_id : null;
-    const destAcc = commitment.type === 'to_receive' ? account_id : null;
+      if (account.status !== 'active') {
+        return {
+          status: 400,
+          body: {
+            error: 'INACTIVE_ACCOUNT',
+            message: 'Lançamentos não são permitidos em uma conta financeira inativa.'
+          }
+        };
+      }
 
-    // 5. Execute quitação atomically
-    await transaction(async (runQuery) => {
-      // Create actual real-life transaction linked to the commitment
+      // Determine transaction direction
+      const txType = commitment.type === 'to_pay' ? 'expense' : 'income';
+      const sourceAcc = commitment.type === 'to_pay' ? account_id : null;
+      const destAcc = commitment.type === 'to_receive' ? account_id : null;
+
+      // 5. Create actual real-life transaction linked to the commitment
       const txResult = await runQuery(
         'INSERT INTO `transactions` (`family_id`, `type`, `description`, `amount`, `transaction_date`, `source_account_id`, `destination_account_id`, `responsible_user_id`, `category_id`, `contact_id`, `notes`, `created_by_id`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [
@@ -224,19 +262,44 @@ router.post('/:id/pay', requireAuth, async (req, res, next) => {
       );
       const transactionId = txResult.insertId;
 
-      // Update commitment
+      // 6. Update commitment using id, family_id and status = pending
       const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
-      await runQuery(
-        'UPDATE `commitments` SET `status` = ?, `actual_amount` = ?, `actual_date` = ?, `transaction_id` = ?, `updated_at` = ? WHERE `id` = ?',
-        [CommitmentStatus.PAID, actual_amount, actual_date, transactionId, now, commitmentId]
+      const updateResult = await runQuery(
+        'UPDATE `commitments` SET `status` = ?, `actual_amount` = ?, `actual_date` = ?, `transaction_id` = ?, `updated_at` = ? WHERE `id` = ? AND `family_id` = ? AND `status` = ?',
+        [
+          CommitmentStatus.PAID,
+          actual_amount,
+          actual_date,
+          transactionId,
+          now,
+          commitmentId,
+          familyId,
+          CommitmentStatus.PENDING
+        ]
       );
+
+      // Confirm exactly one row was updated
+      if (updateResult.affectedRows !== 1) {
+        throw new Error('CONCURRENCY_ERROR: Compromisso já liquidado por outra transação simultânea.');
+      }
+
+      return {
+        status: 200,
+        body: {
+          success: true,
+          message: 'Compromisso liquidado com sucesso e transação financeira respectiva registrada.'
+        }
+      };
     });
 
-    res.json({
-      success: true,
-      message: 'Compromisso liquidado com sucesso e transação financeira respectiva registrada.'
-    });
-  } catch (err) {
+    return res.status(result.status).json(result.body);
+  } catch (err: any) {
+    if (err.message && err.message.includes('CONCURRENCY_ERROR')) {
+      return res.status(409).json({
+        error: 'CONCURRENCY_ERROR',
+        message: 'Não foi possível quitar o compromisso. Ele já foi processado ou está sendo processado por outra requisição.'
+      });
+    }
     next(err);
   }
 });

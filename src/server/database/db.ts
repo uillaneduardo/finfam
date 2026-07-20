@@ -133,3 +133,11 @@ export async function transaction<T>(callback: (runQuery: (sql: string, params?:
     conn.release();
   }
 }
+
+export async function closeDb() {
+  if (pool) {
+    await pool.end();
+    pool = null;
+    console.log('✅ Conexão com o banco de dados finalizada com sucesso.');
+  }
+}

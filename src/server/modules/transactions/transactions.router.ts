@@ -56,8 +56,16 @@ router.post('/', requireAuth, async (req, res, next) => {
     responsible_user_id,
     category_id,
     contact_id,
-    notes
+    notes,
+    idempotency_key
   } = parsed.data;
+
+  // Extract idempotency key from header or body
+  const headerKey = req.headers['idempotency-key'] || req.headers['x-idempotency-key'];
+  const rawIdempotencyKey = headerKey || idempotency_key;
+  const finalIdempotencyKey = typeof rawIdempotencyKey === 'string' && rawIdempotencyKey.trim() !== ''
+    ? rawIdempotencyKey.trim()
+    : null;
 
   try {
     // 2. Validate that all related entities exist and belong to the same family
@@ -69,16 +77,19 @@ router.post('/', requireAuth, async (req, res, next) => {
       contact_id
     });
 
-    // 3. Prevent accidental double submissions (deduplication check within last 3 seconds)
-    const [dupRows] = await query(
-      'SELECT `id` FROM `transactions` WHERE `family_id` = ? AND `type` = ? AND `description` = ? AND `amount` = ? AND `transaction_date` = ? AND `created_at` >= NOW() - INTERVAL 3 SECOND LIMIT 1',
-      [familyId, type, description, amount, transaction_date]
-    );
-    if (dupRows.length > 0) {
-      return res.status(409).json({
-        error: 'DUPLICATE_TRANSACTION',
-        message: 'Esta movimentação financeira já foi registrada recentemente. Por favor, aguarde alguns instantes.'
-      });
+    // 3. Idempotency check: Return existing transaction if duplicate key sent
+    if (finalIdempotencyKey) {
+      const [existingTx] = await query(
+        'SELECT `id` FROM `transactions` WHERE `family_id` = ? AND `idempotency_key` = ? LIMIT 1',
+        [familyId, finalIdempotencyKey]
+      );
+      if (existingTx.length > 0) {
+        return res.status(200).json({
+          success: true,
+          transactionId: existingTx[0].id,
+          message: 'Movimentação registrada com sucesso.'
+        });
+      }
     }
 
     // 4. Verify that used accounts are ACTIVE (Cenário 6)
@@ -105,7 +116,7 @@ router.post('/', requireAuth, async (req, res, next) => {
     // 5. Execute transaction atomically
     const result = await transaction(async (runQuery) => {
       const txResult = await runQuery(
-        'INSERT INTO `transactions` (`family_id`, `type`, `description`, `amount`, `transaction_date`, `source_account_id`, `destination_account_id`, `responsible_user_id`, `category_id`, `contact_id`, `notes`, `created_by_id`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO `transactions` (`family_id`, `type`, `description`, `amount`, `transaction_date`, `source_account_id`, `destination_account_id`, `responsible_user_id`, `category_id`, `contact_id`, `notes`, `created_by_id`, `idempotency_key`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [
           familyId,
           type,
@@ -118,7 +129,8 @@ router.post('/', requireAuth, async (req, res, next) => {
           category_id || null,
           contact_id || null,
           notes || null,
-          userId
+          userId,
+          finalIdempotencyKey
         ]
       );
       return txResult;
@@ -129,7 +141,25 @@ router.post('/', requireAuth, async (req, res, next) => {
       transactionId: result.insertId,
       message: 'Movimentação registrada com sucesso.'
     });
-  } catch (err) {
+  } catch (err: any) {
+    // If double submit triggers MySQL unique key violation under race conditions, gracefully return the existing transaction
+    if (err.code === 'ER_DUP_ENTRY' && finalIdempotencyKey && err.message.includes('uq_transactions_idempotency')) {
+      try {
+        const [existingTx] = await query(
+          'SELECT `id` FROM `transactions` WHERE `family_id` = ? AND `idempotency_key` = ? LIMIT 1',
+          [familyId, finalIdempotencyKey]
+        );
+        if (existingTx.length > 0) {
+          return res.status(200).json({
+            success: true,
+            transactionId: existingTx[0].id,
+            message: 'Movimentação registrada com sucesso.'
+          });
+        }
+      } catch (innerErr) {
+        // Fall through to normal error handling
+      }
+    }
     next(err);
   }
 });

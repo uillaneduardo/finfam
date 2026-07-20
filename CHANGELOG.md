@@ -2,6 +2,20 @@
 
 Todas as principais alterações feitas neste repositório para estabilização, segurança e robustez estão listadas abaixo.
 
+## [1.1.0] - 2026-07-20
+
+### Adicionado
+- **Suíte Completa de Testes de Integração de Sistema:** Criada suíte sob `/src/server/integration.test.ts` que executa testes ponta a ponta sem mocks contra banco de dados real, cobrindo 17 cenários completos (51 assertions) de autenticação, multi-tenant, transações, concorrência, idempotência e projetos.
+- **Índice Único de Idempotência:** Adicionado índice único por `family_id` e `idempotency_key` no banco de dados para evitar lançamentos duplicados sob qualquer condição.
+
+### Modificado
+- **Quitação de Compromissos Concorrente:** Refatorado fluxo de pagamento para abrir a transação de forma precoce, buscar o compromisso via `SELECT ... FOR UPDATE` (travamento pessimista), validar status e saldos na mesma transação, e realizar o `UPDATE` atômico validando status `pending` e confirmando que exatamente uma linha foi alterada.
+- **Estratégia de Idempotência Confiável:** Substituída a prevenção temporal por uma validação definitiva baseada em `idempotency_key`, retornando a resposta original armazenada e impedindo duplicidades paralelas de forma resiliente.
+- **Cálculo Monetário Confiável:** Refatoração de todos os cálculos de saldo de contas e projetos para utilizar inteiros (centavos) para evitar imprecisões decimais inerentes ao ponto flutuante do JavaScript.
+
+### Corrigido
+- **Consulta de Balanços e Destruturação do Driver MySQL:** Corrigido bug de desestruturação múltipla nas respostas do `runner` de transação que limpava o invólucro do array de linhas do driver MySQL, resultando em erros `500 TypeError` nas operações de projetos.
+
 ## [1.0.0] - 2026-07-20
 
 ### Adicionado

@@ -27,48 +27,48 @@ router.get('/', requireAuth, async (req, res, next) => {
     // 3. Fetch project operations
     const [projectOps] = await query('SELECT * FROM `project_operations` WHERE `family_id` = ?', [familyId]);
 
-    // Calculate balances
+    // Calculate balances using cent-based integers to avoid floating-point math errors
     const accountsWithBalances = accounts.map(account => {
-      let balance = Number(account.initial_balance);
+      let balanceCents = Math.round(Number(account.initial_balance) * 100);
 
       // Account for transactions
       transactions.forEach(tx => {
-        const amount = Number(tx.amount);
+        const amountCents = Math.round(Number(tx.amount) * 100);
         if (tx.type === 'income' && tx.destination_account_id === account.id) {
-          balance += amount;
+          balanceCents += amountCents;
         } else if (tx.type === 'expense' && tx.source_account_id === account.id) {
-          balance -= amount;
+          balanceCents -= amountCents;
         } else if (tx.type === 'transfer') {
           if (tx.source_account_id === account.id) {
-            balance -= amount;
+            balanceCents -= amountCents;
           }
           if (tx.destination_account_id === account.id) {
-            balance += amount;
+            balanceCents += amountCents;
           }
         }
       });
 
       // Account for project operations (depósitos reduzem saldo livre, retiradas aumentam saldo livre)
-      let reservedAmount = 0;
+      let reservedCents = 0;
       projectOps.forEach(op => {
-        const amount = Number(op.amount);
+        const amountCents = Math.round(Number(op.amount) * 100);
         // Depósito na caixinha tira do saldo livre da conta
         if (op.operation_type === 'deposit' && op.source_account_id === account.id) {
-          reservedAmount += amount;
+          reservedCents += amountCents;
         }
-        // Resgate da caixinha devolve para o saldo nominal e livre da conta
+        // Resgate da caixinha devolve para o saldo livre da conta
         if (op.operation_type === 'withdrawal' && op.destination_account_id === account.id) {
-          reservedAmount -= amount;
+          reservedCents -= amountCents;
         }
       });
 
-      const freeBalance = balance - reservedAmount;
+      const freeBalanceCents = balanceCents - reservedCents;
 
       return {
         ...account,
-        nominal_balance: balance,
-        reserved_balance: reservedAmount,
-        free_balance: freeBalance
+        nominal_balance: balanceCents / 100,
+        reserved_balance: reservedCents / 100,
+        free_balance: freeBalanceCents / 100
       };
     });
 

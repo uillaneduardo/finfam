@@ -58,7 +58,20 @@ export const optionalIdSchema = z.preprocess(
 
 // ISO Date string validator
 export const dateStringSchema = z.string({ message: 'Data é obrigatória.' })
-  .regex(/^\d{4}-\d{2}-\d{2}$/, 'A data deve estar no formato esperado AAAA-MM-DD.');
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'A data deve estar no formato esperado AAAA-MM-DD.')
+  .refine(val => {
+    const [yearStr, monthStr, dayStr] = val.split('-');
+    const year = parseInt(yearStr, 10);
+    const month = parseInt(monthStr, 10);
+    const day = parseInt(dayStr, 10);
+    
+    if (month < 1 || month > 12) return false;
+    
+    const date = new Date(year, month - 1, day);
+    return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
+  }, {
+    message: 'A data fornecida é inválida ou não existe no calendário (ex: 2026-02-31).'
+  });
 
 // 1. Schema: Primeiro Uso
 export const firstUseSetupSchema = z.object({
@@ -122,7 +135,8 @@ export const transactionSchema = z.object({
   responsible_user_id: idSchema,
   category_id: optionalIdSchema,
   contact_id: optionalIdSchema,
-  notes: z.string().trim().optional().nullable()
+  notes: z.string().trim().optional().nullable(),
+  idempotency_key: z.string().trim().optional().nullable()
 }).refine(data => {
   if (data.type === 'expense') {
     return data.source_account_id !== undefined && data.source_account_id !== null;
