@@ -709,6 +709,16 @@ async function runMigrations() {
       }
     }
 
+    // Ensure commitments columns are nullable to match application behavior (handles existing databases)
+    try {
+      console.log('🔄 Adjusting commitments schema constraints for compatibility...');
+      await pool.query('ALTER TABLE `commitments` MODIFY `contact_id` BIGINT UNSIGNED DEFAULT NULL COMMENT "Contato credor ou devedor"');
+      await pool.query('ALTER TABLE `commitments` MODIFY `estimated_account_id` BIGINT UNSIGNED DEFAULT NULL COMMENT "Conta prevista para liquidação"');
+      console.log('✅ Commitments schema adjustments applied successfully.');
+    } catch (alterErr: any) {
+      console.log('ℹ️ Commitments constraints adjustment skipped or already applied:', alterErr.message);
+    }
+
     // One-time cleanup of preseeded data to allow the user to do their own first-use setup
     try {
       const [userRows] = await pool.query('SELECT COUNT(*) as count FROM `users` WHERE `username` = "carlos"');
