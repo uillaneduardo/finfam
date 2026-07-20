@@ -690,6 +690,52 @@ describe('FinFam Full System Integration Tests', () => {
       const [countC] = await query('SELECT COUNT(*) as count FROM `transactions` WHERE `idempotency_key` = ?', [concurrentKey]);
       expect(countC[0].count).toBe(1);
     });
+
+    afterAll(async () => {
+      // 1. Delete all transactions created during Section 8
+      await query(
+        "DELETE FROM `transactions` WHERE `family_id` = ? AND `description` IN (?, ?, ?, ?, ?)",
+        [
+          family1Id,
+          'Almoço Executivo',
+          'Café da manhã especial',
+          'Lanche da Tarde',
+          'Lanche sem chave',
+          'Cinema da Família'
+        ]
+      );
+      // Also delete Family 2's test transaction to be pristine
+      await query(
+        "DELETE FROM `transactions` WHERE `family_id` = ? AND `description` = ?",
+        [family2Id, 'Café da Souza']
+      );
+
+      // 2. Post exactly the two 'Café da manhã especial' (25.50 each) transactions expected by subsequent tests
+      await request(app)
+        .post('/api/transactions')
+        .set('Cookie', adminCookie)
+        .set('Idempotency-Key', 'test-idemp-key-123')
+        .send({
+          type: 'expense',
+          description: 'Café da manhã especial',
+          amount: 25.50,
+          transaction_date: '2026-07-20',
+          source_account_id: account1Id,
+          responsible_user_id: adminUserId
+        });
+
+      await request(app)
+        .post('/api/transactions')
+        .set('Cookie', adminCookie)
+        .send({
+          type: 'expense',
+          description: 'Café da manhã especial',
+          amount: 25.50,
+          transaction_date: '2026-07-20',
+          source_account_id: account1Id,
+          responsible_user_id: adminUserId
+        });
+    });
   });
 
   // 10, 11, 12, 13, 14. Reservas/Caixinhas (Aporte, Resgate, Saldos por conta)

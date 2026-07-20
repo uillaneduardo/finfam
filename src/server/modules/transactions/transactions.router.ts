@@ -67,6 +67,13 @@ router.post('/', requireAuth, async (req, res, next) => {
     ? rawIdempotencyKey.trim()
     : null;
 
+  if (finalIdempotencyKey && finalIdempotencyKey.length > 100) {
+    return res.status(400).json({
+      error: 'VALIDATION_ERROR',
+      message: 'A chave de idempotência não pode exceder 100 caracteres.'
+    });
+  }
+
   try {
     // 2. Validate that all related entities exist and belong to the same family
     await validateRelatedEntities(familyId, {
