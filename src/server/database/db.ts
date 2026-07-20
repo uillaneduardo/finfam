@@ -659,6 +659,7 @@ export async function initDb() {
       waitForConnections: true,
       connectionLimit: 10,
       queueLimit: 0,
+      multipleStatements: true,
     });
 
     // Test connection with short timeout to prevent application hanging during startup
@@ -666,11 +667,51 @@ export async function initDb() {
     conn.release();
     console.log('✅ Connected successfully to MySQL Database!');
     useMock = false;
+
+    // Run migrations if needed
+    await runMigrations();
   } catch (err: any) {
     console.warn('⚠️ Could not connect to MySQL server. Error:', err.message);
     console.warn('⚡ Initializing safe In-Memory JSON file mock database fallback...');
     useMock = true;
     initMockDb();
+  }
+}
+
+async function runMigrations() {
+  if (!pool) return;
+  try {
+    // Check if table users exists by running a simple query
+    try {
+      await pool.query('SELECT 1 FROM `users` LIMIT 1');
+      console.log('✅ Database tables already exist. Skipping migrations.');
+      return;
+    } catch (dbErr: any) {
+      console.log('🔍 Database tables not found (or users table does not exist). Setting up schema...');
+    }
+
+    const migrationPath = path.join(process.cwd(), 'migrations', '001_initial_schema.sql');
+    if (fs.existsSync(migrationPath)) {
+      console.log('🚀 Running initial schema migration...');
+      const schemaSql = fs.readFileSync(migrationPath, 'utf8');
+      await pool.query(schemaSql);
+      console.log('✅ Initial schema created successfully!');
+    } else {
+      console.warn('⚠️ Migration file not found:', migrationPath);
+    }
+
+    // Now, run the seeds if they exist to populate the database with demonstration data
+    const seedPath = path.join(process.cwd(), 'seeds', '001_initial_seed.sql');
+    if (fs.existsSync(seedPath)) {
+      console.log('🌱 Seeding database with initial data...');
+      const seedSql = fs.readFileSync(seedPath, 'utf8');
+      await pool.query(seedSql);
+      console.log('✅ Initial seeds executed successfully!');
+    } else {
+      console.warn('⚠️ Seed file not found:', seedPath);
+    }
+  } catch (err: any) {
+    console.error('❌ Failed to run database migrations/seeds:', err.message);
   }
 }
 
