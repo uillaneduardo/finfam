@@ -6,15 +6,20 @@
 import mysql from 'mysql2/promise';
 import fs from 'fs';
 import path from 'path';
+import dotenv from 'dotenv';
 
-// Load env variables
-const dbConfig = {
-  host: process.env.DB_HOST || '127.0.0.1',
-  port: parseInt(process.env.DB_PORT || '3306', 10),
-  user: process.env.DB_USER || 'finfam_user',
-  password: process.env.DB_PASSWORD || 'finfam_password_forte',
-  database: process.env.DB_NAME || 'finfam_db',
-};
+// Pre-load environment variables at file import time to fix ES Module import hoisting order
+dotenv.config();
+
+function getDbConfig() {
+  return {
+    host: process.env.DB_HOST || '127.0.0.1',
+    port: parseInt(process.env.DB_PORT || '3306', 10),
+    user: process.env.DB_USER || 'finfam_user',
+    password: process.env.DB_PASSWORD || 'finfam_password_forte',
+    database: process.env.DB_NAME || 'finfam_db',
+  };
+}
 
 // JSON Mock database file for resilient fallback when MySQL is not present
 const MOCK_DB_FILE = path.join(process.cwd(), 'finfam_local_db.json');
@@ -654,8 +659,9 @@ export async function initDb() {
   }
 
   try {
+    const config = getDbConfig();
     pool = mysql.createPool({
-      ...dbConfig,
+      ...config,
       waitForConnections: true,
       connectionLimit: 10,
       queueLimit: 0,
