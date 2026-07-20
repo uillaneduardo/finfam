@@ -8,7 +8,15 @@ import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
 
-dotenv.config();
+// Load environment variables cleanly depending on environment
+if (process.env.NODE_ENV === 'test') {
+  const envTestPath = path.join(process.cwd(), '.env.test');
+  if (fs.existsSync(envTestPath)) {
+    dotenv.config({ path: envTestPath, override: true });
+  }
+} else {
+  dotenv.config();
+}
 
 function getDbConfig() {
   return {
@@ -52,11 +60,7 @@ export async function initDb() {
     await checkMigrationStatusOnStartup();
   } catch (err: any) {
     const safeMessage = sanitizeErrorMessage(err.message);
-    console.error('\n❌ ERRO CRÍTICO: Não foi possível conectar ao banco de dados MySQL.');
-    console.error(`Detalhes do erro: ${safeMessage}`);
-    console.error('O MySQL é a fonte oficial de persistência e é obrigatório para inicializar o servidor.');
-    console.error('Verifique as configurações no seu arquivo .env e certifique-se de que o servidor MySQL está rodando.\n');
-    process.exit(1);
+    throw new Error(`Não foi possível conectar ao banco de dados MySQL: ${safeMessage}`);
   }
 }
 

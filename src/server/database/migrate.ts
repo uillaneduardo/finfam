@@ -8,7 +8,15 @@ import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
 
-dotenv.config();
+// Load environment variables cleanly depending on environment
+if (process.env.NODE_ENV === 'test') {
+  const envTestPath = path.join(process.cwd(), '.env.test');
+  if (fs.existsSync(envTestPath)) {
+    dotenv.config({ path: envTestPath, override: true });
+  }
+} else {
+  dotenv.config();
+}
 
 function getDbConfig() {
   return {
@@ -42,8 +50,7 @@ async function getConnectedClient() {
     return connection;
   } catch (err: any) {
     const safeMessage = sanitizeErrorMessage(err.message);
-    console.error(`❌ Erro de conexão com o MySQL (${config.host}:${config.port}):`, safeMessage);
-    process.exit(1);
+    throw new Error(`Erro de conexão com o MySQL (${config.host}:${config.port}): ${safeMessage}`);
   }
 }
 
@@ -92,7 +99,7 @@ export async function getMigrationsStatus() {
 }
 
 // Command: Migrate
-async function runMigrate() {
+export async function runMigrate() {
   console.log('🔄 Verificando e executando migrations pendentes...');
   const conn = await getConnectedClient();
   await ensureMigrationsTable(conn);
@@ -128,7 +135,7 @@ async function runMigrate() {
       } catch (err: any) {
         console.error(`❌ Falha na migration ${file}:`, sanitizeErrorMessage(err.message));
         await conn.end();
-        process.exit(1);
+        throw err;
       }
     }
   }
@@ -171,10 +178,9 @@ async function runStatus() {
 }
 
 // Command: Seed
-async function runSeed() {
+export async function runSeed() {
   if (process.env.NODE_ENV === 'production') {
-    console.error('❌ Operação REJEITADA: Sementeira de demonstração é proibida em ambiente de produção (NODE_ENV=production).');
-    process.exit(1);
+    throw new Error('❌ Operação REJEITADA: Sementeira de demonstração é proibida em ambiente de produção (NODE_ENV=production).');
   }
 
   console.log('🌱 Executando semente de demonstração...');
@@ -182,9 +188,8 @@ async function runSeed() {
   const seedPath = path.join(process.cwd(), 'seeds', '001_initial_seed.sql');
   
   if (!fs.existsSync(seedPath)) {
-    console.error('❌ Arquivo de seed não encontrado:', seedPath);
     await conn.end();
-    process.exit(1);
+    throw new Error(`Arquivo de seed não encontrado: ${seedPath}`);
   }
 
   const sql = fs.readFileSync(seedPath, 'utf8');
@@ -192,26 +197,25 @@ async function runSeed() {
     await conn.query(sql);
     console.log('✅ Dados de demonstração semeados com sucesso!');
   } catch (err: any) {
-    console.error('❌ Erro durante execução do seed:', sanitizeErrorMessage(err.message));
     await conn.end();
-    process.exit(1);
+    throw new Error(`Erro durante execução do seed: ${sanitizeErrorMessage(err.message)}`);
   }
 
   await conn.end();
 }
 
 // Command: Reset
-async function runReset(confirmed: boolean) {
+export async function runReset(confirmed: boolean) {
   if (process.env.NODE_ENV === 'production') {
-    console.error('❌ Operação REJEITADA: Reset de banco de dados é estritamente proibido em ambiente de produção.');
-    process.exit(1);
+    throw new Error('❌ Operação REJEITADA: Reset de banco de dados é estritamente proibido em ambiente de produção.');
   }
 
   if (!confirmed) {
     console.warn('⚠️ ATENÇÃO: Esse comando irá APAGAR TODAS as tabelas e dados do banco de dados!');
     console.warn('Para confirmar essa ação destrutiva, execute novamente passando o argumento --confirm');
     console.warn('Exemplo: npm run db:reset -- --confirm');
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   console.log('🔥 Iniciando destruição e recriação do banco de dados (Reset)...');
@@ -241,8 +245,7 @@ async function runReset(confirmed: boolean) {
     await runMigrate();
     console.log('🎉 Banco de dados reinicializado com sucesso!');
   } catch (err: any) {
-    console.error('❌ Erro durante o reset do banco de dados:', sanitizeErrorMessage(err.message));
-    process.exit(1);
+    throw new Error(`Erro durante o reset do banco de dados: ${sanitizeErrorMessage(err.message)}`);
   }
 }
 

@@ -4,7 +4,11 @@ dist/
 coverage/
 .DS_Store
 *.log
-.env*
+.env
+.env.test
+.env.local
+.env.*.local
 !.env.example
+!.env.test.example
 finfam_local_db.json
 

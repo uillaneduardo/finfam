@@ -40,6 +40,10 @@ export default function Transactions() {
   const [contactId, setContactId] = useState('');
   const [notes, setNotes] = useState('');
 
+  // Idempotency state
+  const [idempotencyKey, setIdempotencyKey] = useState<string>('');
+  const [lastSubmittedPayload, setLastSubmittedPayload] = useState<string>('');
+
   const loadData = async () => {
     try {
       const [txs, accs, cats, conts, usrs] = await Promise.all([
@@ -70,6 +74,20 @@ export default function Transactions() {
     loadData();
   }, []);
 
+  const generateIdempotencyKey = (): string => {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+    // Fallback using crypto.getRandomValues
+    const arr = new Uint8Array(16);
+    crypto.getRandomValues(arr);
+    // Format as UUID v4
+    arr[6] = (arr[6] & 0x0f) | 0x40; // Version 4
+    arr[8] = (arr[8] & 0x3f) | 0x80; // Variant 10xx
+    const hex = Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  };
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -94,23 +112,34 @@ export default function Transactions() {
 
     setSubmitLoading(true);
 
+    const currentPayload = JSON.stringify({
+      type,
+      description,
+      amount: normalizeDecimal(amount),
+      transaction_date: transactionDate,
+      source_account_id: sourceAccountId || null,
+      destination_account_id: destinationAccountId || null,
+      responsible_user_id: Number(responsibleUserId),
+      category_id: categoryId ? Number(categoryId) : null,
+      contact_id: contactId ? Number(contactId) : null,
+      notes: notes || null
+    });
+
+    let activeKey = idempotencyKey;
+    if (!activeKey || currentPayload !== lastSubmittedPayload) {
+      activeKey = generateIdempotencyKey();
+      setIdempotencyKey(activeKey);
+      setLastSubmittedPayload(currentPayload);
+    }
+
     try {
-      const normalizedAmount = normalizeDecimal(amount);
       const res = await fetch('/api/transactions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type,
-          description,
-          amount: normalizedAmount,
-          transaction_date: transactionDate,
-          source_account_id: sourceAccountId || null,
-          destination_account_id: destinationAccountId || null,
-          responsible_user_id: responsibleUserId,
-          category_id: categoryId || null,
-          contact_id: contactId || null,
-          notes: notes || null
-        })
+        headers: { 
+          'Content-Type': 'application/json',
+          'Idempotency-Key': activeKey
+        },
+        body: currentPayload
       });
 
       const data = await res.json();
@@ -118,7 +147,7 @@ export default function Transactions() {
         throw new Error(data.message || 'Falha ao salvar movimentação.');
       }
 
-      // Reset form
+      // Success: Reset form and clear idempotency states for next new transaction
       setDescription('');
       setAmount('');
       setSourceAccountId('');
@@ -126,6 +155,8 @@ export default function Transactions() {
       setCategoryId('');
       setContactId('');
       setNotes('');
+      setIdempotencyKey('');
+      setLastSubmittedPayload('');
       setShowDetails(false);
       setShowForm(false);
       

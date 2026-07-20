@@ -55,8 +55,15 @@ async function startServer() {
   const secretToUse = sessionSecret || 'fallback-secret-for-signing-cookies-finfam';
   app.use(cookieParser(secretToUse));
 
-  // Initialize Database Pool (MySQL or automatic JSON local file fallback)
-  await initDb();
+  // Initialize Database Pool
+  try {
+    await initDb();
+  } catch (err: any) {
+    console.error('\n❌ ERRO CRÍTICO: Não foi possível conectar ao banco de dados MySQL.');
+    console.error(`Detalhes do erro: ${err.message}`);
+    console.error('O MySQL é a fonte oficial de persistência e é obrigatório para inicializar o servidor.\n');
+    process.exit(1);
+  }
 
   // -----------------------------------------------------------------------------
   // API Routes

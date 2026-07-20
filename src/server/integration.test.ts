@@ -11,6 +11,8 @@ import fs from 'fs';
 import path from 'path';
 
 import { initDb, closeDb, query } from './database/db';
+import { validateTestEnvironment } from './utils/dbSecurity';
+import { runMigrate } from './database/migrate';
 import authRouter from './modules/auth/auth.router';
 import accountsRouter from './modules/accounts/accounts.router';
 import transactionsRouter from './modules/transactions/transactions.router';
@@ -46,10 +48,16 @@ const app = createTestApp();
 
 describe('FinFam Full System Integration Tests', () => {
   beforeAll(async () => {
-    // Initialize DB Connection
+    // 1. Validate environment protections
+    validateTestEnvironment();
+
+    // 2. Initialize DB Connection (exclusively to the _test database)
     await initDb();
 
-    // Clean up database tables before executing integration tests to ensure deterministic results
+    // 3. Apply pending migrations on the test database
+    await runMigrate();
+
+    // 4. Clean up database tables after ensuring the schema is complete
     await query('SET FOREIGN_KEY_CHECKS = 0');
     await query('TRUNCATE TABLE `project_operations`');
     await query('TRUNCATE TABLE `projects`');
@@ -100,6 +108,10 @@ describe('FinFam Full System Integration Tests', () => {
   let adminUserId: number;
   let memberUserId: number;
   let family1Id: number;
+  let family2AdminCookie: string;
+  let family2Id: number;
+  let family2AccountId: number;
+  let family2UserId: number;
 
   let account1Id: number;
   let account2Id: number;
@@ -291,10 +303,6 @@ describe('FinFam Full System Integration Tests', () => {
 
   // 6. Isolamento entre duas famílias
   describe('6. Isolamento Multi-Inquilino (Families Isolation)', () => {
-    let family2AdminCookie: string;
-    let family2Id: number;
-    let family2AccountId: number;
-
     beforeAll(async () => {
       // Direct SQL injection to simulate a second pre-existing family
       const [famRes] = await query('INSERT INTO `families` (`name`) VALUES (?)', ['Souza Family']);
@@ -304,6 +312,7 @@ describe('FinFam Full System Integration Tests', () => {
         'INSERT INTO `users` (`family_id`, `name`, `username`, `password_hash`, `role`, `status`) VALUES (?, ?, ?, ?, ?, ?)',
         [family2Id, 'Julio Souza', 'julio_admin', 'some_hash', UserRole.ADMIN, UserStatus.ACTIVE]
       );
+      family2UserId = userRes.insertId;
 
       const [accRes] = await query(
         'INSERT INTO `accounts` (`family_id`, `name`, `institution`, `type`, `holder_name`, `initial_balance`, `status`, `created_by_id`) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
@@ -469,59 +478,110 @@ describe('FinFam Full System Integration Tests', () => {
 
   // 8. Idempotência
   describe('8. Estratégia de Idempotência', () => {
-    it('should process a transaction with an idempotency key normally on first submission', async () => {
-      const key = 'test-idemp-key-123';
+    it('should process a transaction with an idempotency key normally on first submission (201)', async () => {
+      const key = 'test-idemp-key-new-123-unique-uuid-36chars';
+      const payload = {
+        type: 'expense',
+        description: 'Almoço Executivo',
+        amount: 35.00,
+        transaction_date: '2026-07-20',
+        source_account_id: account1Id,
+        responsible_user_id: adminUserId
+      };
       const res = await request(app)
         .post('/api/transactions')
         .set('Cookie', adminCookie)
         .set('Idempotency-Key', key)
-        .send({
-          type: 'expense',
-          description: 'Café da manhã especial',
-          amount: 25.50,
-          transaction_date: '2026-07-20',
-          source_account_id: account1Id,
-          responsible_user_id: adminUserId
-        });
+        .send(payload);
 
       expect(res.status).toBe(201);
       expect(res.body.success).toBe(true);
+      expect(res.body.replayed).toBe(false);
       expect(res.body.transactionId).toBeDefined();
     });
 
-    it('should return exactly the previous transaction ID on duplicate submission with same key', async () => {
-      const key = 'test-idemp-key-123';
-      
-      // Fetch initial database transaction count
-      const [beforeCount] = await query('SELECT COUNT(*) as count FROM `transactions` WHERE `idempotency_key` = ?', [key]);
-      expect(beforeCount[0].count).toBe(1);
+    it('should return 200, replayed: true, same transactionId on duplicate submission with same key', async () => {
+      const key = 'test-idemp-key-new-123-unique-uuid-36chars';
+      const payload = {
+        type: 'expense',
+        description: 'Almoço Executivo',
+        amount: 35.00,
+        transaction_date: '2026-07-20',
+        source_account_id: account1Id,
+        responsible_user_id: adminUserId
+      };
+
+      // Get first created ID
+      const [firstTx] = await query('SELECT `id` FROM `transactions` WHERE `idempotency_key` = ?', [key]);
+      const createdId = firstTx[0].id;
 
       const res = await request(app)
         .post('/api/transactions')
         .set('Cookie', adminCookie)
         .set('Idempotency-Key', key)
-        .send({
-          type: 'expense',
-          description: 'Café da manhã especial',
-          amount: 25.50,
-          transaction_date: '2026-07-20',
-          source_account_id: account1Id,
-          responsible_user_id: adminUserId
-        });
+        .send(payload);
 
-      expect(res.status).toBe(200); // 200 indicating returned previous result
+      expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
+      expect(res.body.replayed).toBe(true);
+      expect(res.body.transactionId).toBe(createdId);
 
-      // Verify no extra row was created in the database
-      const [afterCount] = await query('SELECT COUNT(*) as count FROM `transactions` WHERE `idempotency_key` = ?', [key]);
-      expect(afterCount[0].count).toBe(1);
+      // Verify only 1 row exists
+      const [count] = await query('SELECT COUNT(*) as count FROM `transactions` WHERE `idempotency_key` = ?', [key]);
+      expect(count[0].count).toBe(1);
     });
 
-    it('should not block separate transactions that just share amount/date/description', async () => {
-      // Verify that removing the temporal 3-sec block allows separate legitimate identical transactions
+    it('should reject same key with different payload with 409 Conflict', async () => {
+      const key = 'test-idemp-key-new-123-unique-uuid-36chars';
+      const payload = {
+        type: 'expense',
+        description: 'Almoço Executivo',
+        amount: 55.00, // changed amount!
+        transaction_date: '2026-07-20',
+        source_account_id: account1Id,
+        responsible_user_id: adminUserId
+      };
+
       const res = await request(app)
         .post('/api/transactions')
         .set('Cookie', adminCookie)
+        .set('Idempotency-Key', key)
+        .send(payload);
+
+      expect(res.status).toBe(409);
+      expect(res.body.error).toBe('IDEMPOTENCY_KEY_REUSED');
+      expect(res.body.message).toContain('Esta chave de segurança já foi utilizada em uma movimentação diferente.');
+    });
+
+    it('should reject key that is too long (exceeds 100 max) with 400 Validation Error', async () => {
+      const longKey = 'a'.repeat(101);
+      const payload = {
+        type: 'expense',
+        description: 'Almoço Executivo',
+        amount: 35.00,
+        transaction_date: '2026-07-20',
+        source_account_id: account1Id,
+        responsible_user_id: adminUserId
+      };
+
+      const res = await request(app)
+        .post('/api/transactions')
+        .set('Cookie', adminCookie)
+        .set('Idempotency-Key', longKey)
+        .send(payload);
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('VALIDATION_ERROR');
+    });
+
+    it('should allow identical keys in different families (multi-tenant safety)', async () => {
+      const sharedKey = 'shared-idemp-key-between-families-uuid-xyz';
+      
+      // Post for Family 1
+      const resFam1 = await request(app)
+        .post('/api/transactions')
+        .set('Cookie', adminCookie)
+        .set('Idempotency-Key', sharedKey)
         .send({
           type: 'expense',
           description: 'Café da manhã especial',
@@ -530,9 +590,105 @@ describe('FinFam Full System Integration Tests', () => {
           source_account_id: account1Id,
           responsible_user_id: adminUserId
         });
+      expect(resFam1.status).toBe(201);
+
+      // Post for Family 2 with identical key and payload (should be allowed because unique index is on family_id + idempotency_key)
+      const resFam2 = await request(app)
+        .post('/api/transactions')
+        .set('Cookie', family2AdminCookie)
+        .set('Idempotency-Key', sharedKey)
+        .send({
+          type: 'expense',
+          description: 'Café da Souza',
+          amount: 25.50,
+          transaction_date: '2026-07-20',
+          source_account_id: family2AccountId,
+          responsible_user_id: family2UserId
+        });
+
+      expect(resFam2.status).toBe(201);
+      expect(resFam2.body.success).toBe(true);
+      expect(resFam2.body.replayed).toBe(false);
+      expect(resFam2.body.transactionId).not.toBe(resFam1.body.transactionId);
+    });
+
+    it('should allow identical transactions with different keys', async () => {
+      const payload = {
+        type: 'expense',
+        description: 'Lanche da Tarde',
+        amount: 15.00,
+        transaction_date: '2026-07-20',
+        source_account_id: account1Id,
+        responsible_user_id: adminUserId
+      };
+
+      const res1 = await request(app)
+        .post('/api/transactions')
+        .set('Cookie', adminCookie)
+        .set('Idempotency-Key', 'key-lanche-aaa-36-chars-unique-uuid')
+        .send(payload);
+      expect(res1.status).toBe(201);
+
+      const res2 = await request(app)
+        .post('/api/transactions')
+        .set('Cookie', adminCookie)
+        .set('Idempotency-Key', 'key-lanche-bbb-36-chars-unique-uuid')
+        .send(payload);
+      expect(res2.status).toBe(201);
+
+      expect(res1.body.transactionId).not.toBe(res2.body.transactionId);
+    });
+
+    it('should process transaction normally without an idempotency key', async () => {
+      const payload = {
+        type: 'expense',
+        description: 'Lanche sem chave',
+        amount: 12.00,
+        transaction_date: '2026-07-20',
+        source_account_id: account1Id,
+        responsible_user_id: adminUserId
+      };
+
+      const res = await request(app)
+        .post('/api/transactions')
+        .set('Cookie', adminCookie)
+        .send(payload);
 
       expect(res.status).toBe(201);
       expect(res.body.success).toBe(true);
+      expect(res.body.replayed).toBe(false);
+    });
+
+    it('should handle simultaneous concurrent duplicate requests gracefully, creating only 1 transaction', async () => {
+      const concurrentKey = 'concurrent-test-key-999-unique-uuid-36chars';
+      const concurrentPayload = {
+        type: 'expense',
+        description: 'Cinema da Família',
+        amount: 60.00,
+        transaction_date: '2026-07-20',
+        source_account_id: account1Id,
+        responsible_user_id: adminUserId
+      };
+
+      const [resC1, resC2] = await Promise.all([
+        request(app)
+          .post('/api/transactions')
+          .set('Cookie', adminCookie)
+          .set('Idempotency-Key', concurrentKey)
+          .send(concurrentPayload),
+        request(app)
+          .post('/api/transactions')
+          .set('Cookie', adminCookie)
+          .set('Idempotency-Key', concurrentKey)
+          .send(concurrentPayload)
+      ]);
+
+      expect([200, 201]).toContain(resC1.status);
+      expect([200, 201]).toContain(resC2.status);
+      expect(resC1.body.transactionId).toBe(resC2.body.transactionId);
+
+      const [countC] = await query('SELECT COUNT(*) as count FROM `transactions` WHERE `idempotency_key` = ?', [concurrentKey]);
+      expect(countC[0].count).toBe(1);
     });
   });
 

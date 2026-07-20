@@ -80,15 +80,61 @@ router.post('/', requireAuth, async (req, res, next) => {
     // 3. Idempotency check: Return existing transaction if duplicate key sent
     if (finalIdempotencyKey) {
       const [existingTx] = await query(
-        'SELECT `id` FROM `transactions` WHERE `family_id` = ? AND `idempotency_key` = ? LIMIT 1',
+        'SELECT * FROM `transactions` WHERE `family_id` = ? AND `idempotency_key` = ? LIMIT 1',
         [familyId, finalIdempotencyKey]
       );
       if (existingTx.length > 0) {
-        return res.status(200).json({
-          success: true,
-          transactionId: existingTx[0].id,
-          message: 'Movimentação registrada com sucesso.'
-        });
+        const existing = existingTx[0];
+        
+        // Helper to normalize values for comparison
+        const norm = (val: any) => (val === null || val === undefined ? '' : String(val).trim());
+        const normDesc = (val: any) => norm(val).toLowerCase();
+
+        const sameType = norm(existing.type) === norm(type);
+        const sameDesc = normDesc(existing.description) === normDesc(description);
+        const sameAmount = Number(existing.amount) === Number(amount);
+
+        // Normalize dates
+        let existingDateStr = '';
+        if (existing.transaction_date instanceof Date) {
+          existingDateStr = existing.transaction_date.toISOString().split('T')[0];
+        } else {
+          existingDateStr = norm(existing.transaction_date).split('T')[0];
+        }
+        let parsedDateStr = norm(transaction_date).split('T')[0];
+        const sameDate = existingDateStr === parsedDateStr;
+
+        const sameSrc = (existing.source_account_id === null ? null : Number(existing.source_account_id)) === 
+                        (source_account_id === null || source_account_id === undefined ? null : Number(source_account_id));
+        
+        const sameDest = (existing.destination_account_id === null ? null : Number(existing.destination_account_id)) === 
+                         (destination_account_id === null || destination_account_id === undefined ? null : Number(destination_account_id));
+
+        const sameResp = Number(existing.responsible_user_id) === Number(responsible_user_id);
+
+        const sameCat = (existing.category_id === null ? null : Number(existing.category_id)) === 
+                        (category_id === null || category_id === undefined ? null : Number(category_id));
+
+        const sameCont = (existing.contact_id === null ? null : Number(existing.contact_id)) === 
+                         (contact_id === null || contact_id === undefined ? null : Number(contact_id));
+
+        const sameNotes = norm(existing.notes) === norm(notes);
+
+        const match = sameType && sameDesc && sameAmount && sameDate && sameSrc && sameDest && sameResp && sameCat && sameCont && sameNotes;
+
+        if (match) {
+          return res.status(200).json({
+            success: true,
+            replayed: true,
+            transactionId: existing.id,
+            message: 'Movimentação registrada com sucesso.'
+          });
+        } else {
+          return res.status(409).json({
+            error: 'IDEMPOTENCY_KEY_REUSED',
+            message: 'Esta chave de segurança já foi utilizada em uma movimentação diferente.'
+          });
+        }
       }
     }
 
@@ -138,6 +184,7 @@ router.post('/', requireAuth, async (req, res, next) => {
 
     res.status(201).json({
       success: true,
+      replayed: false,
       transactionId: result.insertId,
       message: 'Movimentação registrada com sucesso.'
     });
@@ -146,15 +193,59 @@ router.post('/', requireAuth, async (req, res, next) => {
     if (err.code === 'ER_DUP_ENTRY' && finalIdempotencyKey && err.message.includes('uq_transactions_idempotency')) {
       try {
         const [existingTx] = await query(
-          'SELECT `id` FROM `transactions` WHERE `family_id` = ? AND `idempotency_key` = ? LIMIT 1',
+          'SELECT * FROM `transactions` WHERE `family_id` = ? AND `idempotency_key` = ? LIMIT 1',
           [familyId, finalIdempotencyKey]
         );
         if (existingTx.length > 0) {
-          return res.status(200).json({
-            success: true,
-            transactionId: existingTx[0].id,
-            message: 'Movimentação registrada com sucesso.'
-          });
+          const existing = existingTx[0];
+          
+          const norm = (val: any) => (val === null || val === undefined ? '' : String(val).trim());
+          const normDesc = (val: any) => norm(val).toLowerCase();
+
+          const sameType = norm(existing.type) === norm(type);
+          const sameDesc = normDesc(existing.description) === normDesc(description);
+          const sameAmount = Number(existing.amount) === Number(amount);
+
+          let existingDateStr = '';
+          if (existing.transaction_date instanceof Date) {
+            existingDateStr = existing.transaction_date.toISOString().split('T')[0];
+          } else {
+            existingDateStr = norm(existing.transaction_date).split('T')[0];
+          }
+          let parsedDateStr = norm(transaction_date).split('T')[0];
+          const sameDate = existingDateStr === parsedDateStr;
+
+          const sameSrc = (existing.source_account_id === null ? null : Number(existing.source_account_id)) === 
+                          (source_account_id === null || source_account_id === undefined ? null : Number(source_account_id));
+          
+          const sameDest = (existing.destination_account_id === null ? null : Number(existing.destination_account_id)) === 
+                           (destination_account_id === null || destination_account_id === undefined ? null : Number(destination_account_id));
+
+          const sameResp = Number(existing.responsible_user_id) === Number(responsible_user_id);
+
+          const sameCat = (existing.category_id === null ? null : Number(existing.category_id)) === 
+                          (category_id === null || category_id === undefined ? null : Number(category_id));
+
+          const sameCont = (existing.contact_id === null ? null : Number(existing.contact_id)) === 
+                           (contact_id === null || contact_id === undefined ? null : Number(contact_id));
+
+          const sameNotes = norm(existing.notes) === norm(notes);
+
+          const match = sameType && sameDesc && sameAmount && sameDate && sameSrc && sameDest && sameResp && sameCat && sameCont && sameNotes;
+
+          if (match) {
+            return res.status(200).json({
+              success: true,
+              replayed: true,
+              transactionId: existing.id,
+              message: 'Movimentação registrada com sucesso.'
+            });
+          } else {
+            return res.status(409).json({
+              error: 'IDEMPOTENCY_KEY_REUSED',
+              message: 'Esta chave de segurança já foi utilizada em uma movimentação diferente.'
+            });
+          }
         }
       } catch (innerErr) {
         // Fall through to normal error handling

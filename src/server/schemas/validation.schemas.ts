@@ -136,7 +136,7 @@ export const transactionSchema = z.object({
   category_id: optionalIdSchema,
   contact_id: optionalIdSchema,
   notes: z.string().trim().optional().nullable(),
-  idempotency_key: z.string().trim().optional().nullable()
+  idempotency_key: z.string().trim().min(36).max(100).optional().nullable()
 }).refine(data => {
   if (data.type === 'expense') {
     return data.source_account_id !== undefined && data.source_account_id !== null;
