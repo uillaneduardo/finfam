@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { ArrowUpRight, ArrowDownLeft, RefreshCw, AlertCircle, Plus, Sparkles, Filter } from 'lucide-react';
-import { formatCurrency, formatDate } from '../utils/format';
+import { formatCurrency, formatDate, normalizeDecimal } from '../utils/format';
 import { Account, Transaction, Category, Contact, User } from '../../shared/types';
 
 export default function Transactions() {
@@ -95,13 +95,14 @@ export default function Transactions() {
     setSubmitLoading(true);
 
     try {
+      const normalizedAmount = normalizeDecimal(amount);
       const res = await fetch('/api/transactions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           type,
           description,
-          amount,
+          amount: normalizedAmount,
           transaction_date: transactionDate,
           source_account_id: sourceAccountId || null,
           destination_account_id: destinationAccountId || null,
@@ -232,13 +233,13 @@ export default function Transactions() {
               </label>
               <input
                 id="tx-amount"
-                type="number"
-                step="0.01"
+                type="text"
+                inputMode="decimal"
                 required
                 className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
                 placeholder="0.00"
                 value={amount}
-                onChange={(e) => setAmount(e.target.value)}
+                onChange={(e) => setAmount(e.target.value.replace(/[^0-9.,-]/g, ''))}
               />
             </div>
           </div>

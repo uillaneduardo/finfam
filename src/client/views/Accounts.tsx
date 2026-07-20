@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Wallet, Plus, Sparkles, Building2, User } from 'lucide-react';
-import { formatCurrency } from '../utils/format';
+import { formatCurrency, normalizeDecimal } from '../utils/format';
 import { Account } from '../../shared/types';
 
 export default function Accounts() {
@@ -53,6 +53,7 @@ export default function Accounts() {
     setSubmitLoading(true);
 
     try {
+      const normalizedBalance = normalizeDecimal(initialBalance);
       const res = await fetch('/api/accounts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -63,7 +64,7 @@ export default function Accounts() {
           holder_name: holderName,
           account_identifier: accountIdentifier || null,
           pix_key: pixKey || null,
-          initial_balance: initialBalance || '0',
+          initial_balance: normalizedBalance || '0',
           notes: notes || null
         })
       });
@@ -206,12 +207,12 @@ export default function Accounts() {
               </label>
               <input
                 id="acc-initial"
-                type="number"
-                step="0.01"
+                type="text"
+                inputMode="decimal"
                 className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm text-slate-900 focus:outline-none"
                 placeholder="0.00"
                 value={initialBalance}
-                onChange={(e) => setInitialBalance(e.target.value)}
+                onChange={(e) => setInitialBalance(e.target.value.replace(/[^0-9.,-]/g, ''))}
               />
             </div>
 

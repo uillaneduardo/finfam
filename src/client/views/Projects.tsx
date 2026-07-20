@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Target, Plus, PiggyBank, Landmark, Sparkles, TrendingUp, X } from 'lucide-react';
-import { formatCurrency, formatDate } from '../utils/format';
+import { formatCurrency, formatDate, normalizeDecimal } from '../utils/format';
 import { Account, Project, User } from '../../shared/types';
 
 export default function Projects() {
@@ -75,6 +75,7 @@ export default function Projects() {
     setSubmitLoading(true);
 
     try {
+      const normalizedTarget = normalizeDecimal(targetAmount);
       const res = await fetch('/api/projects', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -82,7 +83,7 @@ export default function Projects() {
           type,
           name,
           description,
-          target_amount: targetAmount,
+          target_amount: normalizedTarget,
           deadline: deadline || null,
           responsible_user_id: responsibleUserId,
           notes: notes || null
@@ -124,9 +125,10 @@ export default function Projects() {
     setOpLoading(true);
 
     try {
+      const normalizedOpAmount = normalizeDecimal(opAmount);
       const endpoint = `/api/projects/${activeOpProject.project.id}/${activeOpProject.type === 'deposit' ? 'deposit' : 'withdraw'}`;
       const payload = {
-        amount: opAmount,
+        amount: normalizedOpAmount,
         operation_date: opDate,
         notes: opNotes || null,
         [activeOpProject.type === 'deposit' ? 'source_account_id' : 'destination_account_id']: opAccountId
@@ -236,13 +238,13 @@ export default function Projects() {
               </label>
               <input
                 id="proj-amount"
-                type="number"
-                step="0.01"
+                type="text"
+                inputMode="decimal"
                 required
                 className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm text-slate-900 focus:outline-none"
                 placeholder="0.00"
                 value={targetAmount}
-                onChange={(e) => setTargetAmount(e.target.value)}
+                onChange={(e) => setTargetAmount(e.target.value.replace(/[^0-9.,-]/g, ''))}
               />
             </div>
           </div>
@@ -476,13 +478,13 @@ export default function Projects() {
                     Valor Operação (R$)
                   </label>
                   <input
-                    type="number"
-                    step="0.01"
+                    type="text"
+                    inputMode="decimal"
                     required
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm text-slate-900 focus:outline-none"
                     placeholder="0.00"
                     value={opAmount}
-                    onChange={(e) => setOpAmount(e.target.value)}
+                    onChange={(e) => setOpAmount(e.target.value.replace(/[^0-9.,-]/g, ''))}
                   />
                 </div>
 

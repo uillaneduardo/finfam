@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { CalendarClock, Plus, CheckCircle, AlertTriangle, Sparkles, Filter, X } from 'lucide-react';
-import { formatCurrency, formatDate } from '../utils/format';
+import { formatCurrency, formatDate, normalizeDecimal } from '../utils/format';
 import { Account, Commitment, Category, Contact, User } from '../../shared/types';
 
 export default function Commitments() {
@@ -87,13 +87,14 @@ export default function Commitments() {
     setSubmitLoading(true);
 
     try {
+      const normalizedAmount = normalizeDecimal(estimatedAmount);
       const res = await fetch('/api/commitments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           type,
           description,
-          estimated_amount: estimatedAmount,
+          estimated_amount: normalizedAmount,
           due_date: dueDate,
           responsible_user_id: responsibleUserId,
           estimated_account_id: estimatedAccountId || null,
@@ -151,11 +152,12 @@ export default function Commitments() {
     setPayLoading(true);
 
     try {
+      const normalizedPayAmount = normalizeDecimal(payAmount);
       const res = await fetch(`/api/commitments/${payingCommitment.id}/pay`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          actual_amount: payAmount,
+          actual_amount: normalizedPayAmount,
           actual_date: payDate,
           account_id: payAccountId,
           notes: payNotes || null
@@ -288,13 +290,13 @@ export default function Commitments() {
               </label>
               <input
                 id="comm-amount"
-                type="number"
-                step="0.01"
+                type="text"
+                inputMode="decimal"
                 required
                 className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm text-slate-900 focus:outline-none"
                 placeholder="0.00"
                 value={estimatedAmount}
-                onChange={(e) => setEstimatedAmount(e.target.value)}
+                onChange={(e) => setEstimatedAmount(e.target.value.replace(/[^0-9.,-]/g, ''))}
               />
             </div>
           </div>
@@ -587,12 +589,12 @@ export default function Commitments() {
                     Valor Pago Real (R$)
                   </label>
                   <input
-                    type="number"
-                    step="0.01"
+                    type="text"
+                    inputMode="decimal"
                     required
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm text-slate-900 focus:outline-none"
                     value={payAmount}
-                    onChange={(e) => setPayAmount(e.target.value)}
+                    onChange={(e) => setPayAmount(e.target.value.replace(/[^0-9.,-]/g, ''))}
                   />
                 </div>
 

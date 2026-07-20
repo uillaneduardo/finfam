@@ -31,3 +31,24 @@ export function formatDate(dateStr: string): string {
     return dateStr;
   }
 }
+
+/**
+ * Normalizes a decimal string (which may use comma as a decimal separator) into a valid float string
+ */
+export function normalizeDecimal(value: string): string {
+  if (!value) return '';
+  // Replace comma with dot
+  let clean = value.trim().replace(/,/g, '.');
+  
+  // If there are multiple dots (e.g. 1.200.50), keep only the last dot
+  const parts = clean.split('.');
+  if (parts.length > 2) {
+    const decimal = parts.pop();
+    clean = parts.join('') + '.' + decimal;
+  }
+  
+  // Keep only digits, minus sign, and a single dot
+  clean = clean.replace(/[^0-9.-]/g, '');
+  
+  return clean;
+}
