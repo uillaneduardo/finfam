@@ -1,6 +1,6 @@
 {
   "name": "FinFam",
-  "description": "Documentação e planejamento do projeto FinFam - Finanças Familiares Compartilhadas.",
+  "description": "Plataforma completa de controle financeiro familiar compartilhado (FinFam) com gestão de contas, lançamentos, compromissos e caixinhas.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
