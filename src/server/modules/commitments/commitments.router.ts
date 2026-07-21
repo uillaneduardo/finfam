@@ -93,6 +93,56 @@ router.get('/', requireAuth, async (req, res, next) => {
   }
 });
 
+function calculateNextDueDate(baseDateStr: string, index: number, recurrenceType: string): string {
+  if (index === 0 || recurrenceType === 'none') return baseDateStr;
+
+  const [yearStr, monthStr, dayStr] = baseDateStr.split('-');
+  let year = parseInt(yearStr, 10);
+  let month = parseInt(monthStr, 10) - 1;
+  let day = parseInt(dayStr, 10);
+
+  if (recurrenceType === 'weekly') {
+    const date = new Date(year, month, day);
+    date.setDate(date.getDate() + (index * 7));
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  if (recurrenceType === 'biweekly') {
+    const date = new Date(year, month, day);
+    date.setDate(date.getDate() + (index * 14));
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  if (recurrenceType === 'monthly') {
+    month += index;
+    const targetDate = new Date(year, month, 1);
+    year = targetDate.getFullYear();
+    month = targetDate.getMonth();
+    const daysInTargetMonth = new Date(year, month + 1, 0).getDate();
+    const validDay = Math.min(day, daysInTargetMonth);
+    const m = String(month + 1).padStart(2, '0');
+    const d = String(validDay).padStart(2, '0');
+    return `${year}-${m}-${d}`;
+  }
+
+  if (recurrenceType === 'yearly') {
+    year += index;
+    const daysInTargetMonth = new Date(year, month + 1, 0).getDate();
+    const validDay = Math.min(day, daysInTargetMonth);
+    const m = String(month + 1).padStart(2, '0');
+    const d = String(validDay).padStart(2, '0');
+    return `${year}-${m}-${d}`;
+  }
+
+  return baseDateStr;
+}
+
 /**
  * POST /api/commitments
  * Agenda um novo compromisso futuro (a pagar ou receber)
@@ -120,6 +170,7 @@ router.post('/', requireAuth, async (req, res, next) => {
     estimated_account_id,
     category_id,
     recurrence_type,
+    recurrence_count,
     notes
   } = parsed.data;
 
@@ -132,40 +183,63 @@ router.post('/', requireAuth, async (req, res, next) => {
       category_id
     });
 
-    const [result] = await query(
-      'INSERT INTO `commitments` (`family_id`, `type`, `description`, `estimated_amount`, `due_date`, `contact_id`, `responsible_user_id`, `estimated_account_id`, `category_id`, `status`, `recurrence_type`, `notes`, `created_by_id`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [
-        familyId,
-        type,
-        description,
-        estimated_amount,
-        due_date,
-        contact_id || null,
-        responsible_user_id,
-        estimated_account_id || null,
-        category_id || null,
-        CommitmentStatus.PENDING,
-        recurrence_type || 'none',
-        notes || null,
-        userId
-      ]
-    );
+    const count = (recurrence_type && recurrence_type !== 'none') ? Math.max(1, recurrence_count || 1) : 1;
+    let firstInsertId = 0;
+
+    for (let i = 0; i < count; i++) {
+      const itemDueDate = calculateNextDueDate(due_date, i, recurrence_type || 'none');
+      const itemDescription = count > 1 ? `${description} (${i + 1}/${count})` : description;
+
+      const [result] = await query(
+        'INSERT INTO `commitments` (`family_id`, `type`, `description`, `estimated_amount`, `due_date`, `contact_id`, `responsible_user_id`, `estimated_account_id`, `category_id`, `status`, `recurrence_type`, `notes`, `created_by_id`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+          familyId,
+          type,
+          itemDescription,
+          estimated_amount,
+          itemDueDate,
+          contact_id || null,
+          responsible_user_id,
+          estimated_account_id || null,
+          category_id || null,
+          CommitmentStatus.PENDING,
+          recurrence_type || 'none',
+          notes || null,
+          userId
+        ]
+      );
+
+      if (i === 0) {
+        firstInsertId = result.insertId;
+      }
+    }
 
     const userName = await getUserName(userId);
-    const formattedAmount = Number(estimated_amount).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    const unitAmountFormatted = Number(estimated_amount).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+    let notificationMessage = '';
+    if (count > 1) {
+      const totalAmountFormatted = (Number(estimated_amount) * count).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+      notificationMessage = `${userName} agendou o compromisso recorrente '${description}' em ${count} parcelas de ${unitAmountFormatted} (Total: ${totalAmountFormatted}).`;
+    } else {
+      notificationMessage = `${userName} agendou o compromisso '${description}' (${unitAmountFormatted}).`;
+    }
+
     await notifyFamily({
       familyId,
       actorUserId: userId,
       module: 'commitment',
       action: 'create',
       title: 'Compromisso Agendado',
-      message: `${userName} agendou o compromisso '${description}' (${formattedAmount}).`
+      message: notificationMessage
     });
 
     res.status(201).json({
       success: true,
-      commitmentId: result.insertId,
-      message: 'Compromisso agendado com sucesso.'
+      commitmentId: firstInsertId,
+      message: count > 1 
+        ? `${count} parcelas recorrentes do compromisso foram agendadas com sucesso.` 
+        : 'Compromisso agendado com sucesso.'
     });
   } catch (err) {
     next(err);

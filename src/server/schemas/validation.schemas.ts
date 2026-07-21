@@ -202,7 +202,11 @@ export const commitmentSchema = z.object({
   responsible_user_id: idSchema,
   estimated_account_id: optionalIdSchema,
   category_id: optionalIdSchema,
-  recurrence_type: z.enum(['none', 'monthly', 'weekly']).default('none'),
+  recurrence_type: z.enum(['none', 'monthly', 'weekly', 'biweekly', 'yearly']).default('none'),
+  recurrence_count: z.preprocess(
+    (val) => (val === '' || val === null || val === undefined ? 1 : Number(val)),
+    z.number().int().min(1, 'Quantidade de repetições deve ser pelo menos 1.').max(120, 'Quantidade de repetições não pode exceder 120.').default(1)
+  ),
   notes: z.string().trim().optional().nullable()
 });
 

@@ -43,6 +43,7 @@ export default function Commitments() {
   const [categoryId, setCategoryId] = useState('');
   const [contactId, setContactId] = useState('');
   const [recurrenceType, setRecurrenceType] = useState('none');
+  const [recurrenceCount, setRecurrenceCount] = useState<string>('3');
   const [notes, setNotes] = useState('');
 
   // Payment modal/inline form state
@@ -64,6 +65,7 @@ export default function Commitments() {
     setCategoryId('');
     setContactId('');
     setRecurrenceType('none');
+    setRecurrenceCount('3');
     setNotes('');
     setError(null);
   };
@@ -118,6 +120,7 @@ export default function Commitments() {
         category_id: categoryId ? Number(categoryId) : null,
         contact_id: contactId ? Number(contactId) : null,
         recurrence_type: recurrenceType,
+        recurrence_count: recurrenceType !== 'none' ? Math.max(1, Number(recurrenceCount) || 1) : 1,
         notes: notes || null
       };
 
@@ -497,11 +500,45 @@ export default function Commitments() {
               >
                 <option value="none">Única (Não repete)</option>
                 <option value="weekly">Semanal</option>
+                <option value="biweekly">Quinzenal</option>
                 <option value="monthly">Mensal</option>
                 <option value="yearly">Anual</option>
               </select>
             </div>
+
+            {recurrenceType !== 'none' && (
+              <div>
+                <label htmlFor="comm-recur-count" className="block text-xs font-medium text-slate-700 mb-1">
+                  Quantidade de Vezes / Parcelas
+                </label>
+                <input
+                  id="comm-recur-count"
+                  type="number"
+                  min="1"
+                  max="120"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm text-slate-900 focus:outline-none"
+                  value={recurrenceCount}
+                  onChange={(e) => setRecurrenceCount(e.target.value)}
+                  placeholder="Ex: 3"
+                />
+              </div>
+            )}
           </div>
+
+          {recurrenceType !== 'none' && (
+            <div className="bg-amber-50 border border-amber-200/80 rounded-xl p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs text-amber-900 font-medium">
+              <div className="flex items-center space-x-2">
+                <span className="text-base">💡</span>
+                <span>
+                  <strong>Cálculo do Compromisso Recorrente:</strong>{' '}
+                  {formatCurrency(normalizeDecimal(estimatedAmount) || 0)} ({recurrenceType === 'weekly' ? 'semanal' : recurrenceType === 'biweekly' ? 'quinzenal' : recurrenceType === 'monthly' ? 'mensal' : 'anual'}) × {Math.max(1, Number(recurrenceCount) || 1)} vezes
+                </span>
+              </div>
+              <span className="text-sm font-extrabold text-amber-950 font-mono bg-amber-100 px-2.5 py-1 rounded-lg">
+                Total: {formatCurrency((normalizeDecimal(estimatedAmount) || 0) * (Math.max(1, Number(recurrenceCount) || 1)))}
+              </span>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
