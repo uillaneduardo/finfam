@@ -34,14 +34,24 @@ export default function Login({ onLoginSuccess }: LoginProps) {
         body: JSON.stringify({ username, password })
       });
 
-      const data = await res.json();
+      let data: any = {};
+      try {
+        data = await res.json();
+      } catch {
+        // Trata respostas que não estejam no formato JSON
+      }
+
       if (!res.ok) {
-        throw new Error(data.message || 'Credenciais inválidas. Verifique seu usuário e senha.');
+        throw new Error(data.message || data.error || 'Credenciais inválidas. Verifique seu usuário e senha.');
       }
 
       onLoginSuccess();
     } catch (err: any) {
-      setError(err.message);
+      if (err?.message === 'Failed to fetch' || err?.name === 'TypeError') {
+        setError('Não foi possível conectar ao servidor. Verifique se o serviço está em execução e sua conexão de rede.');
+      } else {
+        setError(err.message || 'Erro ao realizar login.');
+      }
     } finally {
       setLoading(false);
     }
