@@ -59,4 +59,61 @@ router.post('/', requireAuth, async (req, res, next) => {
   }
 });
 
+/**
+ * PUT /api/contacts/:id
+ * Atualização de contato financeiro
+ */
+router.put('/:id', requireAuth, async (req, res, next) => {
+  const familyId = req.session!.familyId;
+  const contactId = req.params.id;
+
+  const parsed = contactSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({
+      error: 'VALIDATION_ERROR',
+      message: parsed.error.issues.map(err => err.message).join(', ')
+    });
+  }
+
+  const { name, type, phone, document_number, pix_key, notes } = parsed.data;
+
+  try {
+    const [check] = await query('SELECT `id` FROM `contacts` WHERE `id` = ? AND `family_id` = ?', [contactId, familyId]);
+    if (check.length === 0) {
+      return res.status(404).json({ message: 'Contato não encontrado.' });
+    }
+
+    await query(
+      'UPDATE `contacts` SET `name` = ?, `type` = ?, `phone` = ?, `document_number` = ?, `pix_key` = ?, `notes` = ? WHERE `id` = ? AND `family_id` = ?',
+      [name, type, phone || null, document_number || null, pix_key || null, notes || null, contactId, familyId]
+    );
+
+    res.json({ success: true, message: 'Contato atualizado com sucesso.' });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * DELETE /api/contacts/:id
+ * Exclusão de contato financeiro
+ */
+router.delete('/:id', requireAuth, async (req, res, next) => {
+  const familyId = req.session!.familyId;
+  const contactId = req.params.id;
+
+  try {
+    const [check] = await query('SELECT `id` FROM `contacts` WHERE `id` = ? AND `family_id` = ?', [contactId, familyId]);
+    if (check.length === 0) {
+      return res.status(404).json({ message: 'Contato não encontrado.' });
+    }
+
+    await query('DELETE FROM `contacts` WHERE `id` = ? AND `family_id` = ?', [contactId, familyId]);
+
+    res.json({ success: true, message: 'Contato removido com sucesso.' });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;

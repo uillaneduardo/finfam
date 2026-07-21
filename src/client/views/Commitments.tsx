@@ -4,9 +4,10 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { CalendarClock, Plus, CheckCircle, AlertTriangle, Sparkles, Filter, X } from 'lucide-react';
+import { CalendarClock, Plus, CheckCircle, AlertTriangle, Sparkles, Filter, X, Pencil, Trash2 } from 'lucide-react';
 import { formatCurrency, formatDate, normalizeDecimal } from '../utils/format';
 import { Account, Commitment, Category, Contact, User } from '../../shared/types';
+import ConfirmModal from '../components/ConfirmModal';
 
 export default function Commitments() {
   const [commitments, setCommitments] = useState<Commitment[]>([]);
@@ -23,6 +24,11 @@ export default function Commitments() {
   const [payingCommitment, setPayingCommitment] = useState<Commitment | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [payError, setPayError] = useState<string | null>(null);
+
+  // Edit & Delete State
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [deletingCommitment, setDeletingCommitment] = useState<Commitment | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   // Filter state (all, today, week, month, overdue)
   const [filterPeriod, setFilterPeriod] = useState<string>('all');
@@ -44,6 +50,141 @@ export default function Commitments() {
   const [payDate, setPayDate] = useState(new Date().toISOString().split('T')[0]);
   const [payAmount, setPayAmount] = useState('');
   const [payNotes, setPayNotes] = useState('');
+
+  const resetForm = () => {
+    setEditingId(null);
+    setType('to_pay');
+    setDescription('');
+    setEstimatedAmount('');
+    setDueDate('');
+    if (users && users.length > 0) {
+      setResponsibleUserId(users[0].id.toString());
+    }
+    setEstimatedAccountId('');
+    setCategoryId('');
+    setContactId('');
+    setRecurrenceType('none');
+    setNotes('');
+    setError(null);
+  };
+
+  const handleStartEdit = (comm: Commitment) => {
+    setEditingId(comm.id);
+    setType(comm.type);
+    setDescription(comm.description);
+    setEstimatedAmount(comm.estimated_amount.toString());
+    
+    let dateStr = '';
+    if (comm.due_date) {
+      dateStr = String(comm.due_date).substring(0, 10);
+    }
+    setDueDate(dateStr);
+    
+    setResponsibleUserId(comm.responsible_user_id ? comm.responsible_user_id.toString() : '');
+    setEstimatedAccountId(comm.estimated_account_id ? comm.estimated_account_id.toString() : '');
+    setCategoryId(comm.category_id ? comm.category_id.toString() : '');
+    setContactId(comm.contact_id ? comm.contact_id.toString() : '');
+    setRecurrenceType(comm.recurrence_type || 'none');
+    setNotes(comm.notes || '');
+    setError(null);
+    setShowForm(true);
+
+    const formEl = document.getElementById('comm-form');
+    if (formEl) {
+      formEl.scrollIntoView({ behavior: 'smooth' });
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+
+    if (!type || !description || !estimatedAmount || !dueDate || !responsibleUserId) {
+      setError('Por favor, preencha todos os campos obrigatórios.');
+      return;
+    }
+
+    setSubmitLoading(true);
+
+    try {
+      const normalizedAmount = normalizeDecimal(estimatedAmount);
+      const payload = {
+        type,
+        description,
+        estimated_amount: normalizedAmount,
+        due_date: dueDate,
+        responsible_user_id: Number(responsibleUserId),
+        estimated_account_id: estimatedAccountId ? Number(estimatedAccountId) : null,
+        category_id: categoryId ? Number(categoryId) : null,
+        contact_id: contactId ? Number(contactId) : null,
+        recurrence_type: recurrenceType,
+        notes: notes || null
+      };
+
+      if (editingId) {
+        const res = await fetch(`/api/commitments/${editingId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.message || 'Falha ao atualizar compromisso.');
+        }
+      } else {
+        const res = await fetch('/api/commitments', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.message || 'Falha ao agendar compromisso.');
+        }
+      }
+
+      resetForm();
+      setShowForm(false);
+
+      setLoading(true);
+      await loadData();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setSubmitLoading(false);
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deletingCommitment) return;
+    setDeleteLoading(true);
+
+    try {
+      const res = await fetch(`/api/commitments/${deletingCommitment.id}`, {
+        method: 'DELETE'
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.message || 'Falha ao excluir compromisso.');
+      }
+
+      setDeletingCommitment(null);
+      if (editingId === deletingCommitment.id) {
+        resetForm();
+        setShowForm(false);
+      }
+
+      setLoading(true);
+      await loadData();
+    } catch (err: any) {
+      alert(err.message || 'Erro ao excluir compromisso.');
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
 
   const loadData = async () => {
     try {
@@ -242,10 +383,21 @@ export default function Commitments() {
 
       {/* New Commitment Form */}
       {showForm && (
-        <form id="commitment-entry-form" onSubmit={handleCreate} className="bg-white border border-slate-200 rounded-2xl p-6 shadow-md space-y-4">
-          <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider border-b border-slate-100 pb-2">
-            Agendar Compromisso Financeiro
-          </h3>
+        <form id="commitment-entry-form" onSubmit={handleSubmit} className="bg-white border border-slate-200 rounded-2xl p-6 shadow-md space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+            <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">
+              {editingId ? 'Editar Compromisso Financeiro' : 'Agendar Compromisso Financeiro'}
+            </h3>
+            {editingId && (
+              <button
+                type="button"
+                onClick={resetForm}
+                className="text-xs text-slate-500 hover:text-slate-700 underline font-medium"
+              >
+                Cancelar Edição
+              </button>
+            )}
+          </div>
 
           {error && (
             <div id="comm-form-error" className="bg-rose-50 border border-rose-100 text-rose-700 text-xs p-3.5 rounded-xl">
@@ -401,19 +553,44 @@ export default function Commitments() {
             </div>
           </div>
 
-          <div className="flex justify-end pt-2">
-            <button
-              id="comm-form-submit-btn"
-              type="submit"
-              disabled={submitLoading}
-              className="px-6 py-2.5 bg-slate-950 text-white rounded-xl text-xs font-semibold hover:bg-slate-800 disabled:opacity-50 flex items-center space-x-1.5"
-            >
-              {submitLoading ? (
-                <span>Agendando...</span>
-              ) : (
-                <span>Confirmar Agendamento</span>
+          <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+            {editingId ? (
+              <button
+                type="button"
+                onClick={() => {
+                  const currentComm = commitments.find(c => c.id === editingId);
+                  if (currentComm) setDeletingCommitment(currentComm);
+                }}
+                className="px-4 py-2 bg-rose-50 text-rose-700 hover:bg-rose-100 rounded-xl text-xs font-semibold transition-colors flex items-center space-x-1"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Excluir Compromisso</span>
+              </button>
+            ) : <div />}
+
+            <div className="flex items-center space-x-2">
+              {editingId && (
+                <button
+                  type="button"
+                  onClick={resetForm}
+                  className="px-4 py-2 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-xl text-xs font-semibold transition-colors"
+                >
+                  Cancelar
+                </button>
               )}
-            </button>
+              <button
+                id="comm-form-submit-btn"
+                type="submit"
+                disabled={submitLoading}
+                className="px-6 py-2.5 bg-slate-950 text-white rounded-xl text-xs font-semibold hover:bg-slate-800 disabled:opacity-50 flex items-center space-x-1.5 shadow-sm"
+              >
+                {submitLoading ? (
+                  <span>Salvando...</span>
+                ) : (
+                  <span>{editingId ? 'Salvar Alterações' : 'Confirmar Agendamento'}</span>
+                )}
+              </button>
+            </div>
           </div>
         </form>
       )}
@@ -520,7 +697,7 @@ export default function Commitments() {
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between md:justify-end gap-6 shrink-0 border-t md:border-t-0 pt-3 md:pt-0 border-slate-100">
+                <div className="flex items-center justify-between md:justify-end gap-4 shrink-0 border-t md:border-t-0 pt-3 md:pt-0 border-slate-100">
                   <div className="text-left md:text-right">
                     <span className="text-[10px] text-slate-400 uppercase tracking-wider font-mono block">Valor Estimado</span>
                     <span className="text-xs font-bold text-slate-900 font-mono">{formatCurrency(comm.estimated_amount)}</span>
@@ -530,11 +707,28 @@ export default function Commitments() {
                     <button
                       id={`pay-commitment-${comm.id}`}
                       onClick={() => startPayment(comm)}
-                      className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 transition-colors shadow-sm"
+                      className="px-3.5 py-1.5 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 transition-colors shadow-sm"
                     >
-                      Quitar Compromisso
+                      Quitar
                     </button>
                   )}
+
+                  <div className="flex items-center space-x-1 pl-2 border-l border-slate-100">
+                    <button
+                      onClick={() => handleStartEdit(comm)}
+                      className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+                      title="Editar compromisso"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => setDeletingCommitment(comm)}
+                      className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                      title="Excluir compromisso"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
               </div>
             );
@@ -649,6 +843,20 @@ export default function Commitments() {
           </div>
         </div>
       )}
+
+      {/* Confirmation Modal */}
+      <ConfirmModal
+        isOpen={!!deletingCommitment}
+        title="Confirmar Exclusão de Compromisso"
+        message={
+          deletingCommitment
+            ? `Tem certeza que deseja excluir o compromisso "${deletingCommitment.description}" no valor de ${formatCurrency(deletingCommitment.estimated_amount)}? Esta ação não poderá ser desfeita.`
+            : ''
+        }
+        isLoading={deleteLoading}
+        onConfirm={handleConfirmDelete}
+        onClose={() => setDeletingCommitment(null)}
+      />
     </div>
   );
 }

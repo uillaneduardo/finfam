@@ -262,4 +262,106 @@ router.post('/', requireAuth, async (req, res, next) => {
   }
 });
 
+/**
+ * PUT /api/transactions/:id
+ * Atualiza uma movimentação financeira existente
+ */
+router.put('/:id', requireAuth, async (req, res, next) => {
+  const familyId = req.session!.familyId;
+  const { id } = req.params;
+
+  const parsed = transactionSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({
+      error: 'VALIDATION_ERROR',
+      message: parsed.error.issues.map(err => err.message).join(', ')
+    });
+  }
+
+  const {
+    type,
+    description,
+    amount,
+    transaction_date,
+    source_account_id,
+    destination_account_id,
+    responsible_user_id,
+    category_id,
+    contact_id,
+    notes
+  } = parsed.data;
+
+  try {
+    await validateRelatedEntities(familyId, {
+      source_account_id,
+      destination_account_id,
+      responsible_user_id,
+      category_id,
+      contact_id
+    });
+
+    const [result] = await query(
+      `UPDATE \`transactions\` SET
+        \`type\` = ?,
+        \`description\` = ?,
+        \`amount\` = ?,
+        \`transaction_date\` = ?,
+        \`source_account_id\` = ?,
+        \`destination_account_id\` = ?,
+        \`responsible_user_id\` = ?,
+        \`category_id\` = ?,
+        \`contact_id\` = ?,
+        \`notes\` = ?,
+        \`updated_at\` = NOW()
+       WHERE \`id\` = ? AND \`family_id\` = ?`,
+      [
+        type,
+        description,
+        amount,
+        transaction_date,
+        source_account_id || null,
+        destination_account_id || null,
+        responsible_user_id,
+        category_id || null,
+        contact_id || null,
+        notes || null,
+        id,
+        familyId
+      ]
+    );
+
+    if ((result as any).affectedRows === 0) {
+      return res.status(404).json({ error: 'NOT_FOUND', message: 'Movimentação não encontrada.' });
+    }
+
+    res.json({ success: true, message: 'Movimentação atualizada com sucesso.' });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * DELETE /api/transactions/:id
+ * Remove uma movimentação financeira existente
+ */
+router.delete('/:id', requireAuth, async (req, res, next) => {
+  const familyId = req.session!.familyId;
+  const { id } = req.params;
+
+  try {
+    const [result] = await query(
+      'DELETE FROM `transactions` WHERE `id` = ? AND `family_id` = ?',
+      [id, familyId]
+    );
+
+    if ((result as any).affectedRows === 0) {
+      return res.status(404).json({ error: 'NOT_FOUND', message: 'Movimentação não encontrada.' });
+    }
+
+    res.json({ success: true, message: 'Movimentação excluída com sucesso.' });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;

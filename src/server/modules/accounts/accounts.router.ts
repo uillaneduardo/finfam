@@ -112,4 +112,83 @@ router.post('/', requireAuth, async (req, res, next) => {
   }
 });
 
+/**
+ * PUT /api/accounts/:id
+ * Atualiza uma conta financeira
+ */
+router.put('/:id', requireAuth, async (req, res, next) => {
+  const familyId = req.session!.familyId;
+  const { id } = req.params;
+
+  const parsed = accountSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({
+      error: 'VALIDATION_ERROR',
+      message: parsed.error.issues.map(err => err.message).join(', ')
+    });
+  }
+
+  const { name, institution, type, holder_name, account_identifier, pix_key, initial_balance, notes } = parsed.data;
+
+  try {
+    const [result] = await query(
+      `UPDATE \`accounts\` SET
+        \`name\` = ?,
+        \`institution\` = ?,
+        \`type\` = ?,
+        \`holder_name\` = ?,
+        \`account_identifier\` = ?,
+        \`pix_key\` = ?,
+        \`initial_balance\` = ?,
+        \`notes\` = ?,
+        \`updated_at\` = NOW()
+       WHERE \`id\` = ? AND \`family_id\` = ?`,
+      [
+        name,
+        institution,
+        type,
+        holder_name,
+        account_identifier || null,
+        pix_key || null,
+        initial_balance,
+        notes || null,
+        id,
+        familyId
+      ]
+    );
+
+    if ((result as any).affectedRows === 0) {
+      return res.status(404).json({ error: 'NOT_FOUND', message: 'Conta financeira não encontrada.' });
+    }
+
+    res.json({ success: true, message: 'Conta financeira atualizada com sucesso.' });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * DELETE /api/accounts/:id
+ * Remove/arquiva uma conta financeira
+ */
+router.delete('/:id', requireAuth, async (req, res, next) => {
+  const familyId = req.session!.familyId;
+  const { id } = req.params;
+
+  try {
+    const [result] = await query(
+      'DELETE FROM `accounts` WHERE `id` = ? AND `family_id` = ?',
+      [id, familyId]
+    );
+
+    if ((result as any).affectedRows === 0) {
+      return res.status(404).json({ error: 'NOT_FOUND', message: 'Conta não encontrada.' });
+    }
+
+    res.json({ success: true, message: 'Conta financeira excluída com sucesso.' });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;

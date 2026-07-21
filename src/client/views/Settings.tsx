@@ -4,8 +4,9 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Settings as SettingsIcon, Users, Tag, Plus, Check, ShieldAlert, AlertCircle } from 'lucide-react';
-import { Category, User, UserRole, UserStatus } from '../../shared/types';
+import { Settings as SettingsIcon, Users, Tag, Plus, Check, ShieldAlert, AlertCircle, Pencil, Trash2, Contact as ContactIcon, Phone, FileText } from 'lucide-react';
+import { Category, Contact, ContactType, User, UserRole, UserStatus } from '../../shared/types';
+import ConfirmModal from '../components/ConfirmModal';
 
 interface SettingsProps {
   currentUser: any;
@@ -14,13 +15,30 @@ interface SettingsProps {
 export default function Settings({ currentUser }: SettingsProps) {
   const [categories, setCategories] = useState<Category[]>([]);
   const [members, setMembers] = useState<User[]>([]);
+  const [contacts, setContacts] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // Category Form State
+  // Category Form & Edit State
   const [catName, setCatName] = useState('');
   const [catType, setCatType] = useState<'income' | 'expense'>('expense');
   const [catLoading, setCatLoading] = useState(false);
   const [catError, setCatError] = useState<string | null>(null);
+  const [editingCatId, setEditingCatId] = useState<number | null>(null);
+  const [deletingCat, setDeletingCat] = useState<Category | null>(null);
+  const [deleteCatLoading, setDeleteCatLoading] = useState(false);
+
+  // Contact Form & Edit State
+  const [contactName, setContactName] = useState('');
+  const [contactType, setContactType] = useState<ContactType>(ContactType.PERSON);
+  const [contactPhone, setContactPhone] = useState('');
+  const [contactDoc, setContactDoc] = useState('');
+  const [contactPix, setContactPix] = useState('');
+  const [contactNotes, setContactNotes] = useState('');
+  const [contactLoading, setContactLoading] = useState(false);
+  const [contactError, setContactError] = useState<string | null>(null);
+  const [editingContactId, setEditingContactId] = useState<number | null>(null);
+  const [deletingContact, setDeletingContact] = useState<Contact | null>(null);
+  const [deleteContactLoading, setDeleteContactLoading] = useState(false);
 
   // Member Form State
   const [memberName, setMemberName] = useState('');
@@ -34,13 +52,15 @@ export default function Settings({ currentUser }: SettingsProps) {
 
   const loadSettingsData = async () => {
     try {
-      const [cats, usrs] = await Promise.all([
+      const [cats, usrs, cnts] = await Promise.all([
         fetch('/api/categories').then(r => r.json()),
-        fetch('/api/users').then(r => r.json())
+        fetch('/api/users').then(r => r.json()),
+        fetch('/api/contacts').then(r => r.json())
       ]);
 
       setCategories(cats || []);
       setMembers(usrs || []);
+      setContacts(cnts || []);
     } catch (err) {
       console.error('Error loading settings data:', err);
     } finally {
@@ -52,7 +72,21 @@ export default function Settings({ currentUser }: SettingsProps) {
     loadSettingsData();
   }, []);
 
-  const handleCategoryCreate = async (e: React.FormEvent) => {
+  const resetCatForm = () => {
+    setEditingCatId(null);
+    setCatName('');
+    setCatType('expense');
+    setCatError(null);
+  };
+
+  const handleStartEditCat = (c: Category) => {
+    setEditingCatId(c.id);
+    setCatName(c.name);
+    setCatType(c.type as 'income' | 'expense');
+    setCatError(null);
+  };
+
+  const handleCategorySave = async (e: React.FormEvent) => {
     e.preventDefault();
     setCatError(null);
 
@@ -64,23 +98,166 @@ export default function Settings({ currentUser }: SettingsProps) {
     setCatLoading(true);
 
     try {
-      const res = await fetch('/api/categories', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: catName, type: catType })
-      });
+      if (editingCatId) {
+        const res = await fetch(`/api/categories/${editingCatId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: catName, type: catType })
+        });
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.message || 'Falha ao salvar categoria.');
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.message || 'Falha ao atualizar categoria.');
+        }
+      } else {
+        const res = await fetch('/api/categories', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: catName, type: catType })
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.message || 'Falha ao salvar categoria.');
+        }
       }
 
-      setCatName('');
+      resetCatForm();
       await loadSettingsData();
     } catch (err: any) {
       setCatError(err.message);
     } finally {
       setCatLoading(false);
+    }
+  };
+
+  const handleConfirmDeleteCat = async () => {
+    if (!deletingCat) return;
+    setDeleteCatLoading(true);
+
+    try {
+      const res = await fetch(`/api/categories/${deletingCat.id}`, {
+        method: 'DELETE'
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.message || 'Falha ao excluir categoria.');
+      }
+
+      setDeletingCat(null);
+      if (editingCatId === deletingCat.id) {
+        resetCatForm();
+      }
+
+      await loadSettingsData();
+    } catch (err: any) {
+      alert(err.message || 'Erro ao excluir categoria.');
+    } finally {
+      setDeleteCatLoading(false);
+    }
+  };
+
+  const resetContactForm = () => {
+    setEditingContactId(null);
+    setContactName('');
+    setContactType(ContactType.PERSON);
+    setContactPhone('');
+    setContactDoc('');
+    setContactPix('');
+    setContactNotes('');
+    setContactError(null);
+  };
+
+  const handleStartEditContact = (c: Contact) => {
+    setEditingContactId(c.id);
+    setContactName(c.name);
+    setContactType(c.type || ContactType.PERSON);
+    setContactPhone(c.phone || '');
+    setContactDoc(c.document_number || '');
+    setContactPix(c.pix_key || '');
+    setContactNotes(c.notes || '');
+    setContactError(null);
+  };
+
+  const handleContactSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setContactError(null);
+
+    if (!contactName) {
+      setContactError('O nome do contato é obrigatório.');
+      return;
+    }
+
+    setContactLoading(true);
+
+    try {
+      const payload = {
+        name: contactName,
+        type: contactType,
+        phone: contactPhone || null,
+        document_number: contactDoc || null,
+        pix_key: contactPix || null,
+        notes: contactNotes || null
+      };
+
+      if (editingContactId) {
+        const res = await fetch(`/api/contacts/${editingContactId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.message || 'Falha ao atualizar contato.');
+        }
+      } else {
+        const res = await fetch('/api/contacts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.message || 'Falha ao cadastrar contato.');
+        }
+      }
+
+      resetContactForm();
+      await loadSettingsData();
+    } catch (err: any) {
+      setContactError(err.message);
+    } finally {
+      setContactLoading(false);
+    }
+  };
+
+  const handleConfirmDeleteContact = async () => {
+    if (!deletingContact) return;
+    setDeleteContactLoading(true);
+
+    try {
+      const res = await fetch(`/api/contacts/${deletingContact.id}`, {
+        method: 'DELETE'
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.message || 'Falha ao excluir contato.');
+      }
+
+      setDeletingContact(null);
+      if (editingContactId === deletingContact.id) {
+        resetContactForm();
+      }
+
+      await loadSettingsData();
+    } catch (err: any) {
+      alert(err.message || 'Erro ao excluir contato.');
+    } finally {
+      setDeleteContactLoading(false);
     }
   };
 
@@ -176,7 +353,22 @@ export default function Settings({ currentUser }: SettingsProps) {
             <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider">Categorias de Lançamentos</h2>
           </div>
 
-          <form onSubmit={handleCategoryCreate} className="space-y-4">
+          <form onSubmit={handleCategorySave} className="space-y-4">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                {editingCatId ? 'Editar Categoria' : 'Nova Categoria'}
+              </span>
+              {editingCatId && (
+                <button
+                  type="button"
+                  onClick={resetCatForm}
+                  className="text-xs text-slate-500 hover:text-slate-700 underline font-medium"
+                >
+                  Cancelar Edição
+                </button>
+              )}
+            </div>
+
             {catError && (
               <div className="bg-rose-50 border border-rose-100 text-rose-700 text-xs p-3 rounded-xl">
                 {catError}
@@ -209,25 +401,52 @@ export default function Settings({ currentUser }: SettingsProps) {
               </div>
             </div>
 
-            <button
-              type="submit"
-              disabled={catLoading}
-              className="w-full py-2.5 bg-slate-900 text-white rounded-xl text-xs font-semibold hover:bg-slate-850 disabled:opacity-50 flex items-center justify-center space-x-1"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Adicionar Categoria</span>
-            </button>
+            <div className="flex items-center space-x-2">
+              {editingCatId && (
+                <button
+                  type="button"
+                  onClick={resetCatForm}
+                  className="px-4 py-2 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-xl text-xs font-semibold transition-colors"
+                >
+                  Cancelar
+                </button>
+              )}
+              <button
+                type="submit"
+                disabled={catLoading}
+                className="flex-1 py-2.5 bg-slate-900 text-white rounded-xl text-xs font-semibold hover:bg-slate-850 disabled:opacity-50 flex items-center justify-center space-x-1"
+              >
+                <Plus className="w-4 h-4" />
+                <span>{editingCatId ? 'Salvar Alterações' : 'Adicionar Categoria'}</span>
+              </button>
+            </div>
           </form>
 
           <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
             {categories.map(c => (
               <div key={c.id} className="flex justify-between items-center p-2.5 rounded-xl hover:bg-slate-50 border border-slate-100 transition-colors">
                 <span className="text-xs font-bold text-slate-900">{c.name}</span>
-                <span className={`text-[9px] px-2 py-0.5 rounded-full font-bold font-mono uppercase ${
-                  c.type === 'income' ? 'bg-emerald-50 text-emerald-800' : 'bg-rose-50 text-rose-800'
-                }`}>
-                  {c.type === 'income' ? 'Entrada' : 'Saída'}
-                </span>
+                <div className="flex items-center space-x-2">
+                  <span className={`text-[9px] px-2 py-0.5 rounded-full font-bold font-mono uppercase ${
+                    c.type === 'income' ? 'bg-emerald-50 text-emerald-800' : 'bg-rose-50 text-rose-800'
+                  }`}>
+                    {c.type === 'income' ? 'Entrada' : 'Saída'}
+                  </span>
+                  <button
+                    onClick={() => handleStartEditCat(c)}
+                    className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+                    title="Editar categoria"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => setDeletingCat(c)}
+                    className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                    title="Excluir categoria"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -358,6 +577,182 @@ export default function Settings({ currentUser }: SettingsProps) {
           </div>
         </div>
       </div>
+
+      {/* Contatos e Fornecedores Configuration */}
+      <div className="bg-white border border-slate-150 rounded-2xl p-6 shadow-sm space-y-6">
+        <div className="flex items-center space-x-2 border-b border-slate-100 pb-3">
+          <ContactIcon className="w-5 h-5 text-slate-800" />
+          <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider">Contatos e Fornecedores</h2>
+        </div>
+
+        <form onSubmit={handleContactSave} className="space-y-4">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+              {editingContactId ? 'Editar Contato' : 'Novo Contato / Fornecedor'}
+            </span>
+            {editingContactId && (
+              <button
+                type="button"
+                onClick={resetContactForm}
+                className="text-xs text-slate-500 hover:text-slate-700 underline font-medium"
+              >
+                Cancelar Edição
+              </button>
+            )}
+          </div>
+
+          {contactError && (
+            <div className="bg-rose-50 border border-rose-100 text-rose-700 text-xs p-3 rounded-xl">
+              {contactError}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Nome / Razão Social</label>
+              <input
+                type="text"
+                required
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm text-slate-900 focus:outline-none"
+                placeholder="Ex: Mercado Central"
+                value={contactName}
+                onChange={(e) => setContactName(e.target.value)}
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Tipo de Contato</label>
+              <select
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm text-slate-900 focus:outline-none"
+                value={contactType}
+                onChange={(e) => setContactType(e.target.value as ContactType)}
+              >
+                <option value={ContactType.PERSON}>Pessoa Física</option>
+                <option value={ContactType.COMPANY}>Empresa / PJ</option>
+                <option value={ContactType.SUPPLIER}>Fornecedor</option>
+                <option value={ContactType.CLIENT}>Cliente</option>
+                <option value={ContactType.BANK}>Instituição Financeira</option>
+                <option value={ContactType.OTHER}>Outro</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Telefone / WhatsApp</label>
+              <input
+                type="text"
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm text-slate-900 focus:outline-none"
+                placeholder="(11) 99999-9999"
+                value={contactPhone}
+                onChange={(e) => setContactPhone(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">CPF / CNPJ</label>
+              <input
+                type="text"
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm text-slate-900 focus:outline-none"
+                placeholder="000.000.000-00"
+                value={contactDoc}
+                onChange={(e) => setContactDoc(e.target.value)}
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Chave PIX</label>
+              <input
+                type="text"
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm text-slate-900 focus:outline-none"
+                placeholder="E-mail, CPF, telefone ou chave aleatória"
+                value={contactPix}
+                onChange={(e) => setContactPix(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center space-x-2">
+            {editingContactId && (
+              <button
+                type="button"
+                onClick={resetContactForm}
+                className="px-4 py-2 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-xl text-xs font-semibold transition-colors"
+              >
+                Cancelar
+              </button>
+            )}
+            <button
+              type="submit"
+              disabled={contactLoading}
+              className="flex-1 py-2.5 bg-slate-900 text-white rounded-xl text-xs font-semibold hover:bg-slate-850 disabled:opacity-50 flex items-center justify-center space-x-1"
+            >
+              <Plus className="w-4 h-4" />
+              <span>{editingContactId ? 'Salvar Alterações' : 'Adicionar Contato'}</span>
+            </button>
+          </div>
+        </form>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-72 overflow-y-auto pr-1">
+          {contacts.map(c => (
+            <div key={c.id} className="flex justify-between items-center p-3 rounded-2xl border border-slate-100 hover:bg-slate-50 transition-colors">
+              <div className="min-w-0 space-y-0.5">
+                <div className="flex items-center space-x-2">
+                  <h4 className="text-xs font-bold text-slate-900 truncate">{c.name}</h4>
+                  <span className="bg-slate-100 text-slate-700 text-[8px] px-1.5 py-0.5 rounded font-mono uppercase font-bold">
+                    {c.type}
+                  </span>
+                </div>
+                {c.phone && <p className="text-[10px] text-slate-500 font-mono">Tel: {c.phone}</p>}
+                {c.pix_key && <p className="text-[10px] text-slate-400 font-mono truncate max-w-[200px]">PIX: {c.pix_key}</p>}
+              </div>
+
+              <div className="flex items-center space-x-1 shrink-0">
+                <button
+                  onClick={() => handleStartEditContact(c)}
+                  className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+                  title="Editar contato"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={() => setDeletingContact(c)}
+                  className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                  title="Excluir contato"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <ConfirmModal
+        isOpen={!!deletingCat}
+        title="Confirmar Exclusão de Categoria"
+        message={
+          deletingCat
+            ? `Tem certeza que deseja excluir a categoria "${deletingCat.name}"? Esta ação não poderá ser desfeita.`
+            : ''
+        }
+        isLoading={deleteCatLoading}
+        onConfirm={handleConfirmDeleteCat}
+        onClose={() => setDeletingCat(null)}
+      />
+
+      <ConfirmModal
+        isOpen={!!deletingContact}
+        title="Confirmar Exclusão de Contato"
+        message={
+          deletingContact
+            ? `Tem certeza que deseja excluir o contato "${deletingContact.name}"? Esta ação não poderá ser desfeita.`
+            : ''
+        }
+        isLoading={deleteContactLoading}
+        onConfirm={handleConfirmDeleteContact}
+        onClose={() => setDeletingContact(null)}
+      />
     </div>
   );
 }

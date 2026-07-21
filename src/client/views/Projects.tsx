@@ -4,9 +4,10 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Target, Plus, PiggyBank, Landmark, Sparkles, TrendingUp, X } from 'lucide-react';
+import { Target, Plus, PiggyBank, Landmark, Sparkles, TrendingUp, X, Pencil, Trash2 } from 'lucide-react';
 import { formatCurrency, formatDate, normalizeDecimal } from '../utils/format';
 import { Account, Project, User } from '../../shared/types';
+import ConfirmModal from '../components/ConfirmModal';
 
 export default function Projects() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -22,7 +23,12 @@ export default function Projects() {
   const [error, setError] = useState<string | null>(null);
   const [opError, setOpError] = useState<string | null>(null);
 
-  // New project form state
+  // Edit & Delete state
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [deletingProject, setDeletingProject] = useState<Project | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+
+  // New/Edit project form state
   const [type, setType] = useState('project');
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -49,7 +55,7 @@ export default function Projects() {
       setAccounts(accs || []);
       setUsers(usrs || []);
 
-      if (usrs && usrs.length > 0) {
+      if (usrs && usrs.length > 0 && !responsibleUserId) {
         setResponsibleUserId(usrs[0].id.toString());
       }
     } catch (err) {
@@ -63,7 +69,39 @@ export default function Projects() {
     loadData();
   }, []);
 
-  const handleCreate = async (e: React.FormEvent) => {
+  const resetForm = () => {
+    setEditingId(null);
+    setType('project');
+    setName('');
+    setDescription('');
+    setTargetAmount('');
+    setDeadline('');
+    setNotes('');
+    setError(null);
+    if (users.length > 0) {
+      setResponsibleUserId(users[0].id.toString());
+    }
+  };
+
+  const handleStartEdit = (proj: Project) => {
+    setEditingId(proj.id);
+    setType(proj.type);
+    setName(proj.name);
+    setDescription(proj.description || '');
+    setTargetAmount(proj.target_amount.toString());
+    setDeadline(proj.deadline || '');
+    setResponsibleUserId(proj.responsible_user_id.toString());
+    setNotes(proj.notes || '');
+    setError(null);
+    setShowForm(true);
+
+    const formEl = document.getElementById('project-form');
+    if (formEl) {
+      formEl.scrollIntoView({ behavior: 'smooth' });
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
@@ -76,31 +114,41 @@ export default function Projects() {
 
     try {
       const normalizedTarget = normalizeDecimal(targetAmount);
-      const res = await fetch('/api/projects', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type,
-          name,
-          description,
-          target_amount: normalizedTarget,
-          deadline: deadline || null,
-          responsible_user_id: responsibleUserId,
-          notes: notes || null
-        })
-      });
+      const payload = {
+        type,
+        name,
+        description,
+        target_amount: normalizedTarget,
+        deadline: deadline || null,
+        responsible_user_id: responsibleUserId,
+        notes: notes || null
+      };
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.message || 'Falha ao cadastrar caixinha de reserva.');
+      if (editingId) {
+        const res = await fetch(`/api/projects/${editingId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.message || 'Falha ao atualizar meta/caixinha.');
+        }
+      } else {
+        const res = await fetch('/api/projects', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.message || 'Falha ao cadastrar caixinha de reserva.');
+        }
       }
 
-      // Reset
-      setName('');
-      setDescription('');
-      setTargetAmount('');
-      setDeadline('');
-      setNotes('');
+      resetForm();
       setShowForm(false);
 
       setLoading(true);
@@ -109,6 +157,35 @@ export default function Projects() {
       setError(err.message);
     } finally {
       setSubmitLoading(false);
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deletingProject) return;
+    setDeleteLoading(true);
+
+    try {
+      const res = await fetch(`/api/projects/${deletingProject.id}`, {
+        method: 'DELETE'
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.message || 'Falha ao excluir caixinha.');
+      }
+
+      setDeletingProject(null);
+      if (editingId === deletingProject.id) {
+        resetForm();
+        setShowForm(false);
+      }
+
+      setLoading(true);
+      await loadData();
+    } catch (err: any) {
+      alert(err.message || 'Erro ao excluir caixinha.');
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -188,12 +265,23 @@ export default function Projects() {
         </button>
       </div>
 
-      {/* New Project Form */}
+      {/* New/Edit Project Form */}
       {showForm && (
-        <form id="project-entry-form" onSubmit={handleCreate} className="bg-white border border-slate-200 rounded-2xl p-6 shadow-md space-y-4">
-          <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider border-b border-slate-100 pb-2">
-            Configurar Nova Meta / Caixinha
-          </h3>
+        <form id="project-entry-form" onSubmit={handleSubmit} className="bg-white border border-slate-200 rounded-2xl p-6 shadow-md space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+            <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">
+              {editingId ? 'Editar Meta / Caixinha' : 'Configurar Nova Meta / Caixinha'}
+            </h3>
+            {editingId && (
+              <button
+                type="button"
+                onClick={resetForm}
+                className="text-xs text-slate-500 hover:text-slate-700 underline font-medium"
+              >
+                Cancelar Edição
+              </button>
+            )}
+          </div>
 
           {error && (
             <div id="project-form-error" className="bg-rose-50 border border-rose-100 text-rose-700 text-xs p-3.5 rounded-xl">
@@ -309,19 +397,44 @@ export default function Projects() {
             />
           </div>
 
-          <div className="flex justify-end pt-2">
-            <button
-              id="project-form-submit-btn"
-              type="submit"
-              disabled={submitLoading}
-              className="px-6 py-2.5 bg-slate-950 text-white rounded-xl text-xs font-semibold hover:bg-slate-800 disabled:opacity-50 flex items-center space-x-1.5"
-            >
-              {submitLoading ? (
-                <span>Criando...</span>
-              ) : (
-                <span>Criar Objetivo</span>
+          <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+            {editingId ? (
+              <button
+                type="button"
+                onClick={() => {
+                  const currentProj = projects.find(p => p.id === editingId);
+                  if (currentProj) setDeletingProject(currentProj);
+                }}
+                className="px-4 py-2 bg-rose-50 text-rose-700 hover:bg-rose-100 rounded-xl text-xs font-semibold transition-colors flex items-center space-x-1"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Excluir Caixinha</span>
+              </button>
+            ) : <div />}
+
+            <div className="flex items-center space-x-2">
+              {editingId && (
+                <button
+                  type="button"
+                  onClick={resetForm}
+                  className="px-4 py-2 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-xl text-xs font-semibold transition-colors"
+                >
+                  Cancelar
+                </button>
               )}
-            </button>
+              <button
+                id="project-form-submit-btn"
+                type="submit"
+                disabled={submitLoading}
+                className="px-6 py-2.5 bg-slate-950 text-white rounded-xl text-xs font-semibold hover:bg-slate-800 disabled:opacity-50 flex items-center space-x-1.5 shadow-sm"
+              >
+                {submitLoading ? (
+                  <span>Salvando...</span>
+                ) : (
+                  <span>{editingId ? 'Salvar Alterações' : 'Criar Objetivo'}</span>
+                )}
+              </button>
+            </div>
           </div>
         </form>
       )}
@@ -364,9 +477,25 @@ export default function Projects() {
                         </span>
                       </div>
                     </div>
-                    <span className="bg-slate-100 text-slate-800 text-[10px] px-2.5 py-0.5 rounded-full font-mono font-bold shrink-0">
-                      {percent}%
-                    </span>
+                    <div className="flex items-center space-x-1.5 shrink-0">
+                      <span className="bg-slate-100 text-slate-800 text-[10px] px-2.5 py-0.5 rounded-full font-mono font-bold">
+                        {percent}%
+                      </span>
+                      <button
+                        onClick={() => handleStartEdit(proj)}
+                        className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+                        title="Editar caixinha"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => setDeletingProject(proj)}
+                        className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                        title="Excluir caixinha"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
 
                   {proj.description && (
@@ -539,6 +668,20 @@ export default function Projects() {
           </div>
         </div>
       )}
+
+      {/* Confirmation Modal */}
+      <ConfirmModal
+        isOpen={!!deletingProject}
+        title="Confirmar Exclusão de Caixinha"
+        message={
+          deletingProject
+            ? `Tem certeza que deseja excluir a caixinha "${deletingProject.name}"? Esta ação não poderá ser desfeita.`
+            : ''
+        }
+        isLoading={deleteLoading}
+        onConfirm={handleConfirmDelete}
+        onClose={() => setDeletingProject(null)}
+      />
     </div>
   );
 }

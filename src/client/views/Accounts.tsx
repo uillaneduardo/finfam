@@ -4,9 +4,10 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Wallet, Plus, Sparkles, Building2, User } from 'lucide-react';
+import { Wallet, Plus, Sparkles, Building2, User, Pencil, Trash2 } from 'lucide-react';
 import { formatCurrency, normalizeDecimal } from '../utils/format';
 import { Account } from '../../shared/types';
+import ConfirmModal from '../components/ConfirmModal';
 
 export default function Accounts() {
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -14,6 +15,11 @@ export default function Accounts() {
   const [submitLoading, setSubmitLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Edit & Delete State
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [deletingAccount, setDeletingAccount] = useState<Account | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   // Form State
   const [name, setName] = useState('');
@@ -41,6 +47,38 @@ export default function Accounts() {
     loadAccounts();
   }, []);
 
+  const resetForm = () => {
+    setEditingId(null);
+    setName('');
+    setInstitution('');
+    setType('checking');
+    setHolderName('');
+    setAccountIdentifier('');
+    setPixKey('');
+    setInitialBalance('');
+    setNotes('');
+    setError(null);
+  };
+
+  const handleStartEdit = (acc: Account) => {
+    setEditingId(acc.id);
+    setName(acc.name);
+    setInstitution(acc.institution);
+    setType(acc.type);
+    setHolderName(acc.holder_name);
+    setAccountIdentifier(acc.account_identifier || '');
+    setPixKey(acc.pix_key || '');
+    setInitialBalance(acc.initial_balance.toString());
+    setNotes(acc.notes || '');
+    setError(null);
+    setShowForm(true);
+
+    const formEl = document.getElementById('account-form');
+    if (formEl) {
+      formEl.scrollIntoView({ behavior: 'smooth' });
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -54,35 +92,42 @@ export default function Accounts() {
 
     try {
       const normalizedBalance = normalizeDecimal(initialBalance);
-      const res = await fetch('/api/accounts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name,
-          institution,
-          type,
-          holder_name: holderName,
-          account_identifier: accountIdentifier || null,
-          pix_key: pixKey || null,
-          initial_balance: normalizedBalance || '0',
-          notes: notes || null
-        })
-      });
+      const payload = {
+        name,
+        institution,
+        type,
+        holder_name: holderName,
+        account_identifier: accountIdentifier || null,
+        pix_key: pixKey || null,
+        initial_balance: normalizedBalance || '0',
+        notes: notes || null
+      };
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.message || 'Falha ao cadastrar conta financeira.');
+      if (editingId) {
+        const res = await fetch(`/api/accounts/${editingId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.message || 'Falha ao atualizar conta financeira.');
+        }
+      } else {
+        const res = await fetch('/api/accounts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.message || 'Falha ao cadastrar conta financeira.');
+        }
       }
 
-      // Reset Form
-      setName('');
-      setInstitution('');
-      setType('checking');
-      setHolderName('');
-      setAccountIdentifier('');
-      setPixKey('');
-      setInitialBalance('');
-      setNotes('');
+      resetForm();
       setShowForm(false);
 
       setLoading(true);
@@ -91,6 +136,35 @@ export default function Accounts() {
       setError(err.message);
     } finally {
       setSubmitLoading(false);
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deletingAccount) return;
+    setDeleteLoading(true);
+
+    try {
+      const res = await fetch(`/api/accounts/${deletingAccount.id}`, {
+        method: 'DELETE'
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.message || 'Falha ao excluir conta.');
+      }
+
+      setDeletingAccount(null);
+      if (editingId === deletingAccount.id) {
+        resetForm();
+        setShowForm(false);
+      }
+
+      setLoading(true);
+      await loadAccounts();
+    } catch (err: any) {
+      alert(err.message || 'Erro ao excluir conta.');
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -122,12 +196,23 @@ export default function Accounts() {
         </button>
       </div>
 
-      {/* New Account Form */}
+      {/* New/Edit Account Form */}
       {showForm && (
         <form id="account-entry-form" onSubmit={handleSubmit} className="bg-white border border-slate-200 rounded-2xl p-6 shadow-md space-y-4">
-          <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider border-b border-slate-100 pb-2">
-            Cadastrar Nova Conta
-          </h3>
+          <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+            <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">
+              {editingId ? 'Editar Conta Financeira' : 'Cadastrar Nova Conta'}
+            </h3>
+            {editingId && (
+              <button
+                type="button"
+                onClick={resetForm}
+                className="text-xs text-slate-500 hover:text-slate-700 underline font-medium"
+              >
+                Cancelar Edição
+              </button>
+            )}
+          </div>
 
           {error && (
             <div id="account-form-error" className="bg-rose-50 border border-rose-100 text-rose-700 text-xs p-3.5 rounded-xl">
@@ -261,19 +346,44 @@ export default function Accounts() {
             </div>
           </div>
 
-          <div className="flex justify-end pt-2">
-            <button
-              id="account-form-submit-btn"
-              type="submit"
-              disabled={submitLoading}
-              className="px-6 py-2.5 bg-slate-950 text-white rounded-xl text-xs font-semibold hover:bg-slate-800 disabled:opacity-50 flex items-center space-x-1.5"
-            >
-              {submitLoading ? (
-                <span>Cadastrando...</span>
-              ) : (
-                <span>Cadastrar Conta</span>
+          <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+            {editingId ? (
+              <button
+                type="button"
+                onClick={() => {
+                  const currentAcc = accounts.find(a => a.id === editingId);
+                  if (currentAcc) setDeletingAccount(currentAcc);
+                }}
+                className="px-4 py-2 bg-rose-50 text-rose-700 hover:bg-rose-100 rounded-xl text-xs font-semibold transition-colors flex items-center space-x-1"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Excluir Conta</span>
+              </button>
+            ) : <div />}
+
+            <div className="flex items-center space-x-2">
+              {editingId && (
+                <button
+                  type="button"
+                  onClick={resetForm}
+                  className="px-4 py-2 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-xl text-xs font-semibold transition-colors"
+                >
+                  Cancelar
+                </button>
               )}
-            </button>
+              <button
+                id="account-form-submit-btn"
+                type="submit"
+                disabled={submitLoading}
+                className="px-6 py-2.5 bg-slate-950 text-white rounded-xl text-xs font-semibold hover:bg-slate-800 disabled:opacity-50 flex items-center space-x-1.5 shadow-sm"
+              >
+                {submitLoading ? (
+                  <span>Salvando...</span>
+                ) : (
+                  <span>{editingId ? 'Salvar Alterações' : 'Cadastrar Conta'}</span>
+                )}
+              </button>
+            </div>
           </div>
         </form>
       )}
@@ -312,11 +422,27 @@ export default function Accounts() {
                       <span className="text-[10px] text-slate-500 font-mono block leading-none mt-0.5">{account.institution}</span>
                     </div>
                   </div>
-                  <span className={`text-[9px] px-2 py-0.5 rounded-full font-bold font-mono uppercase ${
-                    account.status === 'active' ? 'bg-emerald-50 text-emerald-800' : 'bg-slate-100 text-slate-700'
-                  }`}>
-                    {account.status === 'active' ? 'Ativa' : 'Inativa'}
-                  </span>
+                  <div className="flex items-center space-x-2">
+                    <span className={`text-[9px] px-2 py-0.5 rounded-full font-bold font-mono uppercase ${
+                      account.status === 'active' ? 'bg-emerald-50 text-emerald-800' : 'bg-slate-100 text-slate-700'
+                    }`}>
+                      {account.status === 'active' ? 'Ativa' : 'Inativa'}
+                    </span>
+                    <button
+                      onClick={() => handleStartEdit(account)}
+                      className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+                      title="Editar conta"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => setDeletingAccount(account)}
+                      className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                      title="Excluir conta"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
 
                 {/* Sub-balances layout */}
@@ -355,6 +481,20 @@ export default function Accounts() {
           })}
         </div>
       )}
+
+      {/* Confirmation Modal */}
+      <ConfirmModal
+        isOpen={!!deletingAccount}
+        title="Confirmar Exclusão de Conta"
+        message={
+          deletingAccount
+            ? `Tem certeza que deseja excluir a conta "${deletingAccount.name}" (${deletingAccount.institution})? Esta ação não poderá ser desfeita.`
+            : ''
+        }
+        isLoading={deleteLoading}
+        onConfirm={handleConfirmDelete}
+        onClose={() => setDeletingAccount(null)}
+      />
     </div>
   );
 }

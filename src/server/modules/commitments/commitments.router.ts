@@ -304,4 +304,105 @@ router.post('/:id/pay', requireAuth, async (req, res, next) => {
   }
 });
 
+/**
+ * PUT /api/commitments/:id
+ * Atualiza um compromisso financeiro existente
+ */
+router.put('/:id', requireAuth, async (req, res, next) => {
+  const familyId = req.session!.familyId;
+  const { id } = req.params;
+
+  const parsed = commitmentSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({
+      error: 'VALIDATION_ERROR',
+      message: parsed.error.issues.map(err => err.message).join(', ')
+    });
+  }
+
+  const {
+    type,
+    description,
+    estimated_amount,
+    due_date,
+    contact_id,
+    responsible_user_id,
+    estimated_account_id,
+    category_id,
+    recurrence_type,
+    notes
+  } = parsed.data;
+
+  try {
+    await validateRelatedEntities(familyId, {
+      contact_id,
+      responsible_user_id,
+      estimated_account_id,
+      category_id
+    });
+
+    const [result] = await query(
+      `UPDATE \`commitments\` SET
+        \`type\` = ?,
+        \`description\` = ?,
+        \`estimated_amount\` = ?,
+        \`due_date\` = ?,
+        \`contact_id\` = ?,
+        \`responsible_user_id\` = ?,
+        \`estimated_account_id\` = ?,
+        \`category_id\` = ?,
+        \`recurrence_type\` = ?,
+        \`notes\` = ?,
+        \`updated_at\` = NOW()
+       WHERE \`id\` = ? AND \`family_id\` = ?`,
+      [
+        type,
+        description,
+        estimated_amount,
+        due_date,
+        contact_id || null,
+        responsible_user_id,
+        estimated_account_id || null,
+        category_id || null,
+        recurrence_type || 'none',
+        notes || null,
+        id,
+        familyId
+      ]
+    );
+
+    if ((result as any).affectedRows === 0) {
+      return res.status(404).json({ error: 'NOT_FOUND', message: 'Compromisso não encontrado.' });
+    }
+
+    res.json({ success: true, message: 'Compromisso atualizado com sucesso.' });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * DELETE /api/commitments/:id
+ * Remove um compromisso financeiro existente
+ */
+router.delete('/:id', requireAuth, async (req, res, next) => {
+  const familyId = req.session!.familyId;
+  const { id } = req.params;
+
+  try {
+    const [result] = await query(
+      'DELETE FROM `commitments` WHERE `id` = ? AND `family_id` = ?',
+      [id, familyId]
+    );
+
+    if ((result as any).affectedRows === 0) {
+      return res.status(404).json({ error: 'NOT_FOUND', message: 'Compromisso não encontrado.' });
+    }
+
+    res.json({ success: true, message: 'Compromisso excluído com sucesso.' });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;

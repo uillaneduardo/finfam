@@ -4,9 +4,10 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { ArrowUpRight, ArrowDownLeft, RefreshCw, AlertCircle, Plus, Sparkles, Filter } from 'lucide-react';
+import { ArrowUpRight, ArrowDownLeft, RefreshCw, AlertCircle, Plus, Sparkles, Filter, Pencil, Trash2 } from 'lucide-react';
 import { formatCurrency, formatDate, normalizeDecimal } from '../utils/format';
 import { Account, Transaction, Category, Contact, User } from '../../shared/types';
+import ConfirmModal from '../components/ConfirmModal';
 
 export default function Transactions() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -19,6 +20,11 @@ export default function Transactions() {
   const [submitLoading, setSubmitLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Edit & Delete State
+  const [editingTxId, setEditingTxId] = useState<number | null>(null);
+  const [deletingTx, setDeletingTx] = useState<Transaction | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   // Filters state
   const [filterType, setFilterType] = useState<string>('all');
@@ -43,6 +49,60 @@ export default function Transactions() {
   // Idempotency state
   const [idempotencyKey, setIdempotencyKey] = useState<string>('');
   const [lastSubmittedPayload, setLastSubmittedPayload] = useState<string>('');
+
+  const resetForm = () => {
+    setEditingTxId(null);
+    setType('expense');
+    setDescription('');
+    setAmount('');
+    setTransactionDate(new Date().toISOString().split('T')[0]);
+    setSourceAccountId('');
+    setDestinationAccountId('');
+    if (users && users.length > 0) {
+      setResponsibleUserId(users[0].id.toString());
+    }
+    setCategoryId('');
+    setContactId('');
+    setNotes('');
+    setShowDetails(false);
+    setError(null);
+    setIdempotencyKey('');
+    setLastSubmittedPayload('');
+  };
+
+  const handleStartEdit = (tx: Transaction) => {
+    setEditingTxId(tx.id);
+    setType(tx.type);
+    setDescription(tx.description);
+    setAmount(tx.amount.toString());
+    
+    let dateStr = '';
+    if (tx.transaction_date) {
+      dateStr = String(tx.transaction_date).substring(0, 10);
+    } else {
+      dateStr = new Date().toISOString().split('T')[0];
+    }
+    setTransactionDate(dateStr);
+    
+    setSourceAccountId(tx.source_account_id ? tx.source_account_id.toString() : '');
+    setDestinationAccountId(tx.destination_account_id ? tx.destination_account_id.toString() : '');
+    setResponsibleUserId(tx.responsible_user_id ? tx.responsible_user_id.toString() : '');
+    setCategoryId(tx.category_id ? tx.category_id.toString() : '');
+    setContactId(tx.contact_id ? tx.contact_id.toString() : '');
+    setNotes(tx.notes || '');
+    
+    if (tx.category_id || tx.contact_id || tx.notes) {
+      setShowDetails(true);
+    }
+    setError(null);
+    setShowForm(true);
+    
+    // Scroll form into view smoothly
+    const formEl = document.getElementById('tx-entry-form');
+    if (formEl) {
+      formEl.scrollIntoView({ behavior: 'smooth' });
+    }
+  };
 
   const loadData = async () => {
     try {
@@ -88,7 +148,7 @@ export default function Transactions() {
     return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
   };
 
-  const handleCreate = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
@@ -125,48 +185,79 @@ export default function Transactions() {
       notes: notes || null
     });
 
-    let activeKey = idempotencyKey;
-    if (!activeKey || currentPayload !== lastSubmittedPayload) {
-      activeKey = generateIdempotencyKey();
-      setIdempotencyKey(activeKey);
-      setLastSubmittedPayload(currentPayload);
-    }
-
     try {
-      const res = await fetch('/api/transactions', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Idempotency-Key': activeKey
-        },
-        body: currentPayload
-      });
+      if (editingTxId) {
+        const res = await fetch(`/api/transactions/${editingTxId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: currentPayload
+        });
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.message || 'Falha ao salvar movimentação.');
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.message || 'Falha ao atualizar movimentação.');
+        }
+      } else {
+        let activeKey = idempotencyKey;
+        if (!activeKey || currentPayload !== lastSubmittedPayload) {
+          activeKey = generateIdempotencyKey();
+          setIdempotencyKey(activeKey);
+          setLastSubmittedPayload(currentPayload);
+        }
+
+        const res = await fetch('/api/transactions', {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Idempotency-Key': activeKey
+          },
+          body: currentPayload
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.message || 'Falha ao salvar movimentação.');
+        }
       }
 
-      // Success: Reset form and clear idempotency states for next new transaction
-      setDescription('');
-      setAmount('');
-      setSourceAccountId('');
-      setDestinationAccountId('');
-      setCategoryId('');
-      setContactId('');
-      setNotes('');
-      setIdempotencyKey('');
-      setLastSubmittedPayload('');
-      setShowDetails(false);
+      resetForm();
       setShowForm(false);
       
-      // Reload
       setLoading(true);
       await loadData();
     } catch (err: any) {
       setError(err.message);
     } finally {
       setSubmitLoading(false);
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deletingTx) return;
+    setDeleteLoading(true);
+
+    try {
+      const res = await fetch(`/api/transactions/${deletingTx.id}`, {
+        method: 'DELETE'
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.message || 'Falha ao excluir movimentação.');
+      }
+
+      setDeletingTx(null);
+      if (editingTxId === deletingTx.id) {
+        resetForm();
+        setShowForm(false);
+      }
+
+      setLoading(true);
+      await loadData();
+    } catch (err: any) {
+      alert(err.message || 'Erro ao excluir movimentação.');
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -211,10 +302,21 @@ export default function Transactions() {
 
       {/* Quick Launch Form */}
       {showForm && (
-        <form id="tx-entry-form" onSubmit={handleCreate} className="bg-white border border-slate-200 rounded-2xl p-6 shadow-md space-y-4">
-          <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider border-b border-slate-100 pb-2">
-            Registrar Novo Fluxo
-          </h3>
+        <form id="tx-entry-form" onSubmit={handleSubmit} className="bg-white border border-slate-200 rounded-2xl p-6 shadow-md space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+            <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">
+              {editingTxId ? 'Editar Movimentação' : 'Registrar Novo Fluxo'}
+            </h3>
+            {editingTxId && (
+              <button
+                type="button"
+                onClick={resetForm}
+                className="text-xs text-slate-500 hover:text-slate-700 underline font-medium"
+              >
+                Cancelar Edição
+              </button>
+            )}
+          </div>
 
           {error && (
             <div id="tx-form-error" className="bg-rose-50 border border-rose-100 text-rose-700 text-xs p-3.5 rounded-xl">
@@ -414,25 +516,50 @@ export default function Transactions() {
             )}
           </div>
 
-          <div className="flex justify-end pt-2">
-            <button
-              id="tx-form-submit-btn"
-              type="submit"
-              disabled={submitLoading}
-              className="px-6 py-2.5 bg-slate-950 text-white rounded-xl text-xs font-semibold hover:bg-slate-800 disabled:opacity-50 flex items-center space-x-1.5"
-            >
-              {submitLoading ? (
-                <>
-                  <svg className="animate-spin h-3.5 w-3.5 text-white" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                  </svg>
-                  <span>Registrando Lançamento...</span>
-                </>
-              ) : (
-                <span>Confirmar Registro</span>
+          <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+            {editingTxId ? (
+              <button
+                type="button"
+                onClick={() => {
+                  const currentTx = transactions.find(t => t.id === editingTxId);
+                  if (currentTx) setDeletingTx(currentTx);
+                }}
+                className="px-4 py-2 bg-rose-50 text-rose-700 hover:bg-rose-100 rounded-xl text-xs font-semibold transition-colors flex items-center space-x-1"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Excluir Lançamento</span>
+              </button>
+            ) : <div />}
+
+            <div className="flex items-center space-x-2">
+              {editingTxId && (
+                <button
+                  type="button"
+                  onClick={resetForm}
+                  className="px-4 py-2 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-xl text-xs font-semibold transition-colors"
+                >
+                  Cancelar
+                </button>
               )}
-            </button>
+              <button
+                id="tx-form-submit-btn"
+                type="submit"
+                disabled={submitLoading}
+                className="px-6 py-2.5 bg-slate-950 text-white rounded-xl text-xs font-semibold hover:bg-slate-800 disabled:opacity-50 flex items-center space-x-1.5 shadow-sm"
+              >
+                {submitLoading ? (
+                  <>
+                    <svg className="animate-spin h-3.5 w-3.5 text-white" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    <span>Salvando...</span>
+                  </>
+                ) : (
+                  <span>{editingTxId ? 'Salvar Alterações' : 'Confirmar Registro'}</span>
+                )}
+              </button>
+            </div>
           </div>
         </form>
       )}
@@ -531,12 +658,31 @@ export default function Transactions() {
                     </div>
                   </div>
 
-                  <div className="text-left sm:text-right shrink-0">
-                    <span className={`text-sm font-bold font-mono ${
-                      tx.type === 'income' ? 'text-emerald-600' : tx.type === 'expense' ? 'text-rose-600' : 'text-slate-600'
-                    }`}>
-                      {tx.type === 'income' ? '+' : tx.type === 'expense' ? '-' : ''} {formatCurrency(tx.amount)}
-                    </span>
+                  <div className="flex items-center space-x-3 shrink-0">
+                    <div className="text-left sm:text-right">
+                      <span className={`text-sm font-bold font-mono block ${
+                        tx.type === 'income' ? 'text-emerald-600' : tx.type === 'expense' ? 'text-rose-600' : 'text-slate-600'
+                      }`}>
+                        {tx.type === 'income' ? '+' : tx.type === 'expense' ? '-' : ''} {formatCurrency(tx.amount)}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center space-x-1 pl-2 border-l border-slate-100">
+                      <button
+                        onClick={() => handleStartEdit(tx)}
+                        className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+                        title="Editar lançamento"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => setDeletingTx(tx)}
+                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                        title="Excluir lançamento"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               );
@@ -544,6 +690,20 @@ export default function Transactions() {
           </div>
         </div>
       )}
+
+      {/* Confirmation Modal */}
+      <ConfirmModal
+        isOpen={!!deletingTx}
+        title="Confirmar Exclusão de Movimentação"
+        message={
+          deletingTx
+            ? `Tem certeza que deseja excluir a movimentação "${deletingTx.description}" no valor de ${formatCurrency(deletingTx.amount)}? Esta ação é permanente e removerá o lançamento.`
+            : ''
+        }
+        isLoading={deleteLoading}
+        onConfirm={handleConfirmDelete}
+        onClose={() => setDeletingTx(null)}
+      />
     </div>
   );
 }

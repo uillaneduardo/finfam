@@ -369,4 +369,83 @@ router.post('/:id/withdraw', requireAuth, async (req, res, next) => {
   }
 });
 
+/**
+ * PUT /api/projects/:id
+ * Edita dados de um projeto/meta de reserva existente
+ */
+router.put('/:id', requireAuth, async (req, res, next) => {
+  const familyId = req.session!.familyId;
+  const { id } = req.params;
+
+  const parsed = projectSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({
+      error: 'VALIDATION_ERROR',
+      message: parsed.error.issues.map(err => err.message).join(', ')
+    });
+  }
+
+  const { type, name, description, target_amount, deadline, responsible_user_id, notes } = parsed.data;
+
+  try {
+    await validateRelatedEntities(familyId, { responsible_user_id });
+
+    const [result] = await query(
+      `UPDATE \`projects\` SET
+        \`type\` = ?,
+        \`name\` = ?,
+        \`description\` = ?,
+        \`target_amount\` = ?,
+        \`deadline\` = ?,
+        \`responsible_user_id\` = ?,
+        \`notes\` = ?,
+        \`updated_at\` = NOW()
+       WHERE \`id\` = ? AND \`family_id\` = ?`,
+      [
+        type,
+        name,
+        description,
+        target_amount,
+        deadline || null,
+        responsible_user_id,
+        notes || null,
+        id,
+        familyId
+      ]
+    );
+
+    if ((result as any).affectedRows === 0) {
+      return res.status(404).json({ error: 'NOT_FOUND', message: 'Projeto/meta não encontrado.' });
+    }
+
+    res.json({ success: true, message: 'Projeto atualizado com sucesso.' });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * DELETE /api/projects/:id
+ * Exclui um projeto/meta de reserva
+ */
+router.delete('/:id', requireAuth, async (req, res, next) => {
+  const familyId = req.session!.familyId;
+  const { id } = req.params;
+
+  try {
+    const [result] = await query(
+      'DELETE FROM `projects` WHERE `id` = ? AND `family_id` = ?',
+      [id, familyId]
+    );
+
+    if ((result as any).affectedRows === 0) {
+      return res.status(404).json({ error: 'NOT_FOUND', message: 'Projeto não encontrado.' });
+    }
+
+    res.json({ success: true, message: 'Projeto excluído com sucesso.' });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;
