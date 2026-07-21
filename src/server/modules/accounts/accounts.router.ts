@@ -7,6 +7,7 @@ import express from 'express';
 import { query } from '../../database/db';
 import { requireAuth } from '../../middleware/auth';
 import { accountSchema } from '../../schemas/validation.schemas';
+import { notifyFamily, getUserName } from '../notifications/notifications.service';
 
 const router = express.Router();
 
@@ -102,6 +103,16 @@ router.post('/', requireAuth, async (req, res, next) => {
       [familyId, name, institution, type, holder_name, account_identifier || null, pix_key || null, initial_balance, 'active', notes || null, userId]
     );
 
+    const userName = await getUserName(userId);
+    await notifyFamily({
+      familyId,
+      actorUserId: userId,
+      module: 'account',
+      action: 'create',
+      title: 'Nova Conta Criada',
+      message: `${userName} cadastrou a conta '${name}' (${institution}).`
+    });
+
     res.status(201).json({
       success: true,
       accountId: result.insertId,
@@ -161,6 +172,17 @@ router.put('/:id', requireAuth, async (req, res, next) => {
       return res.status(404).json({ error: 'NOT_FOUND', message: 'Conta financeira não encontrada.' });
     }
 
+    const userId = req.session!.userId;
+    const userName = await getUserName(userId);
+    await notifyFamily({
+      familyId,
+      actorUserId: userId,
+      module: 'account',
+      action: 'update',
+      title: 'Conta Atualizada',
+      message: `${userName} atualizou as informações da conta '${name}'.`
+    });
+
     res.json({ success: true, message: 'Conta financeira atualizada com sucesso.' });
   } catch (err) {
     next(err);
@@ -184,6 +206,17 @@ router.delete('/:id', requireAuth, async (req, res, next) => {
     if ((result as any).affectedRows === 0) {
       return res.status(404).json({ error: 'NOT_FOUND', message: 'Conta não encontrada.' });
     }
+
+    const userId = req.session!.userId;
+    const userName = await getUserName(userId);
+    await notifyFamily({
+      familyId,
+      actorUserId: userId,
+      module: 'account',
+      action: 'delete',
+      title: 'Conta Removida',
+      message: `${userName} excluiu uma conta financeira da família.`
+    });
 
     res.json({ success: true, message: 'Conta financeira excluída com sucesso.' });
   } catch (err) {

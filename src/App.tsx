@@ -14,6 +14,8 @@ import Commitments from './client/views/Commitments';
 import Accounts from './client/views/Accounts';
 import Projects from './client/views/Projects';
 import Settings from './client/views/Settings';
+import NotificationCenter from './client/components/NotificationCenter';
+import PwaInstallPrompt from './client/components/PwaInstallPrompt';
 
 export default function App() {
   const [firstUseRequired, setFirstUseRequired] = useState<boolean | null>(null);
@@ -120,8 +122,11 @@ export default function App() {
             </div>
           </div>
 
-          <div className="flex items-center space-x-4">
-            <div className="text-right hidden sm:block">
+          <div className="flex items-center space-x-2 sm:space-x-3">
+            <PwaInstallPrompt />
+            <NotificationCenter />
+
+            <div className="text-right hidden sm:block border-l border-slate-800 pl-3">
               <span className="text-xs font-bold block">{user.name}</span>
               <span className="text-[10px] text-amber-400 font-mono capitalize">{user.role}</span>
             </div>

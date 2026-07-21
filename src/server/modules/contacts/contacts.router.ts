@@ -7,6 +7,7 @@ import express from 'express';
 import { query } from '../../database/db';
 import { requireAuth } from '../../middleware/auth';
 import { contactSchema } from '../../schemas/validation.schemas';
+import { notifyFamily, getUserName } from '../notifications/notifications.service';
 
 const router = express.Router();
 
@@ -49,6 +50,16 @@ router.post('/', requireAuth, async (req, res, next) => {
       [familyId, name, type, phone || null, document_number || null, pix_key || null, notes || null, userId]
     );
 
+    const userName = await getUserName(userId);
+    await notifyFamily({
+      familyId,
+      actorUserId: userId,
+      module: 'contact',
+      action: 'create',
+      title: 'Contato Adicionado',
+      message: `${userName} adicionou o contato '${name}'.`
+    });
+
     res.status(201).json({
       success: true,
       contactId: result.insertId,
@@ -88,6 +99,17 @@ router.put('/:id', requireAuth, async (req, res, next) => {
       [name, type, phone || null, document_number || null, pix_key || null, notes || null, contactId, familyId]
     );
 
+    const userId = req.session!.userId;
+    const userName = await getUserName(userId);
+    await notifyFamily({
+      familyId,
+      actorUserId: userId,
+      module: 'contact',
+      action: 'update',
+      title: 'Contato Atualizado',
+      message: `${userName} atualizou as informações do contato '${name}'.`
+    });
+
     res.json({ success: true, message: 'Contato atualizado com sucesso.' });
   } catch (err) {
     next(err);
@@ -109,6 +131,17 @@ router.delete('/:id', requireAuth, async (req, res, next) => {
     }
 
     await query('DELETE FROM `contacts` WHERE `id` = ? AND `family_id` = ?', [contactId, familyId]);
+
+    const userId = req.session!.userId;
+    const userName = await getUserName(userId);
+    await notifyFamily({
+      familyId,
+      actorUserId: userId,
+      module: 'contact',
+      action: 'delete',
+      title: 'Contato Removido',
+      message: `${userName} excluiu um contato da família.`
+    });
 
     res.json({ success: true, message: 'Contato removido com sucesso.' });
   } catch (err) {

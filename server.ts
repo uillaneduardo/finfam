@@ -19,6 +19,7 @@ import projectsRouter from './src/server/modules/projects/projects.router';
 import contactsRouter from './src/server/modules/contacts/contacts.router';
 import categoriesRouter from './src/server/modules/categories/categories.router';
 import usersRouter from './src/server/modules/users/users.router';
+import notificationsRouter from './src/server/modules/notifications/notifications.router';
 
 // Load environment variables
 dotenv.config();
@@ -81,6 +82,7 @@ async function startServer() {
   app.use('/api/contacts', contactsRouter);
   app.use('/api/categories', categoriesRouter);
   app.use('/api/users', usersRouter);
+  app.use('/api/notifications', notificationsRouter);
 
   // Catch unhandled API paths
   app.use('/api/*', (req, res) => {

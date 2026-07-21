@@ -9,6 +9,7 @@ import { requireAuth } from '../../middleware/auth';
 import { CommitmentStatus } from '../../../shared/types';
 import { commitmentSchema, quitaçãoSchema } from '../../schemas/validation.schemas';
 import { validateRelatedEntities } from '../../utils/family.validator';
+import { notifyFamily, getUserName } from '../notifications/notifications.service';
 
 const router = express.Router();
 
@@ -150,6 +151,17 @@ router.post('/', requireAuth, async (req, res, next) => {
       ]
     );
 
+    const userName = await getUserName(userId);
+    const formattedAmount = Number(estimated_amount).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    await notifyFamily({
+      familyId,
+      actorUserId: userId,
+      module: 'commitment',
+      action: 'create',
+      title: 'Compromisso Agendado',
+      message: `${userName} agendou o compromisso '${description}' (${formattedAmount}).`
+    });
+
     res.status(201).json({
       success: true,
       commitmentId: result.insertId,
@@ -283,6 +295,17 @@ router.post('/:id/pay', requireAuth, async (req, res, next) => {
         throw new Error('CONCURRENCY_ERROR: Compromisso já liquidado por outra transação simultânea.');
       }
 
+      const userName = await getUserName(userId);
+      const formattedAmount = Number(actual_amount).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+      await notifyFamily({
+        familyId,
+        actorUserId: userId,
+        module: 'commitment',
+        action: 'update',
+        title: 'Compromisso Quitado',
+        message: `${userName} quitou o compromisso '${commitment.description}' (${formattedAmount}).`
+      });
+
       return {
         status: 200,
         body: {
@@ -375,6 +398,18 @@ router.put('/:id', requireAuth, async (req, res, next) => {
       return res.status(404).json({ error: 'NOT_FOUND', message: 'Compromisso não encontrado.' });
     }
 
+    const userId = req.session!.userId;
+    const userName = await getUserName(userId);
+    const formattedAmount = Number(estimated_amount).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    await notifyFamily({
+      familyId,
+      actorUserId: userId,
+      module: 'commitment',
+      action: 'update',
+      title: 'Compromisso Alterado',
+      message: `${userName} alterou o compromisso '${description}' (${formattedAmount}).`
+    });
+
     res.json({ success: true, message: 'Compromisso atualizado com sucesso.' });
   } catch (err) {
     next(err);
@@ -398,6 +433,17 @@ router.delete('/:id', requireAuth, async (req, res, next) => {
     if ((result as any).affectedRows === 0) {
       return res.status(404).json({ error: 'NOT_FOUND', message: 'Compromisso não encontrado.' });
     }
+
+    const userId = req.session!.userId;
+    const userName = await getUserName(userId);
+    await notifyFamily({
+      familyId,
+      actorUserId: userId,
+      module: 'commitment',
+      action: 'delete',
+      title: 'Compromisso Removido',
+      message: `${userName} excluiu um compromisso da família.`
+    });
 
     res.json({ success: true, message: 'Compromisso excluído com sucesso.' });
   } catch (err) {

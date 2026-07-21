@@ -7,6 +7,7 @@ import express from 'express';
 import { query } from '../../database/db';
 import { requireAuth } from '../../middleware/auth';
 import { categorySchema } from '../../schemas/validation.schemas';
+import { notifyFamily, getUserName } from '../notifications/notifications.service';
 
 const router = express.Router();
 
@@ -43,10 +44,21 @@ router.post('/', requireAuth, async (req, res, next) => {
   const { name, type } = parsed.data;
 
   try {
+    const userId = req.session!.userId;
     const [result] = await query(
       'INSERT INTO `categories` (`family_id`, `name`, `type`, `status`) VALUES (?, ?, ?, "active")',
       [familyId, name, type]
     );
+
+    const userName = await getUserName(userId);
+    await notifyFamily({
+      familyId,
+      actorUserId: userId,
+      module: 'category',
+      action: 'create',
+      title: 'Categoria Criada',
+      message: `${userName} criou a categoria '${name}'.`
+    });
 
     res.status(201).json({
       success: true,
@@ -87,6 +99,17 @@ router.put('/:id', requireAuth, async (req, res, next) => {
       [name, type, categoryId, familyId]
     );
 
+    const userId = req.session!.userId;
+    const userName = await getUserName(userId);
+    await notifyFamily({
+      familyId,
+      actorUserId: userId,
+      module: 'category',
+      action: 'update',
+      title: 'Categoria Atualizada',
+      message: `${userName} atualizou a categoria '${name}'.`
+    });
+
     res.json({ success: true, message: 'Categoria atualizada com sucesso.' });
   } catch (err) {
     next(err);
@@ -108,6 +131,17 @@ router.delete('/:id', requireAuth, async (req, res, next) => {
     }
 
     await query('DELETE FROM `categories` WHERE `id` = ? AND `family_id` = ?', [categoryId, familyId]);
+
+    const userId = req.session!.userId;
+    const userName = await getUserName(userId);
+    await notifyFamily({
+      familyId,
+      actorUserId: userId,
+      module: 'category',
+      action: 'delete',
+      title: 'Categoria Removida',
+      message: `${userName} excluiu uma categoria.`
+    });
 
     res.json({ success: true, message: 'Categoria removida com sucesso.' });
   } catch (err) {

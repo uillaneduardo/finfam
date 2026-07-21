@@ -8,6 +8,7 @@ import { query, transaction } from '../../database/db';
 import { requireAuth } from '../../middleware/auth';
 import { transactionSchema } from '../../schemas/validation.schemas';
 import { validateRelatedEntities } from '../../utils/family.validator';
+import { notifyFamily, getUserName } from '../notifications/notifications.service';
 
 const router = express.Router();
 
@@ -189,6 +190,17 @@ router.post('/', requireAuth, async (req, res, next) => {
       return txResult;
     });
 
+    const userName = await getUserName(userId);
+    const formattedAmount = Number(amount).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    await notifyFamily({
+      familyId,
+      actorUserId: userId,
+      module: 'transaction',
+      action: 'create',
+      title: 'Novo Lançamento',
+      message: `${userName} lançou '${description}' no valor de ${formattedAmount}.`
+    });
+
     res.status(201).json({
       success: true,
       replayed: false,
@@ -334,6 +346,18 @@ router.put('/:id', requireAuth, async (req, res, next) => {
       return res.status(404).json({ error: 'NOT_FOUND', message: 'Movimentação não encontrada.' });
     }
 
+    const userId = req.session!.userId;
+    const userName = await getUserName(userId);
+    const formattedAmount = Number(amount).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    await notifyFamily({
+      familyId,
+      actorUserId: userId,
+      module: 'transaction',
+      action: 'update',
+      title: 'Lançamento Alterado',
+      message: `${userName} alterou o lançamento '${description}' (${formattedAmount}).`
+    });
+
     res.json({ success: true, message: 'Movimentação atualizada com sucesso.' });
   } catch (err) {
     next(err);
@@ -357,6 +381,17 @@ router.delete('/:id', requireAuth, async (req, res, next) => {
     if ((result as any).affectedRows === 0) {
       return res.status(404).json({ error: 'NOT_FOUND', message: 'Movimentação não encontrada.' });
     }
+
+    const userId = req.session!.userId;
+    const userName = await getUserName(userId);
+    await notifyFamily({
+      familyId,
+      actorUserId: userId,
+      module: 'transaction',
+      action: 'delete',
+      title: 'Lançamento Excluído',
+      message: `${userName} excluiu um lançamento financeiro.`
+    });
 
     res.json({ success: true, message: 'Movimentação excluída com sucesso.' });
   } catch (err) {

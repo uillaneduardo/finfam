@@ -9,6 +9,7 @@ import { requireAuth } from '../../middleware/auth';
 import { ProjectStatus, ProjectOperationType } from '../../../shared/types';
 import { projectSchema, aporteSchema, resgateSchema } from '../../schemas/validation.schemas';
 import { validateRelatedEntities } from '../../utils/family.validator';
+import { notifyFamily, getUserName } from '../notifications/notifications.service';
 
 const router = express.Router();
 
@@ -96,6 +97,16 @@ router.post('/', requireAuth, async (req, res, next) => {
         userId
       ]
     );
+
+    const userName = await getUserName(userId);
+    await notifyFamily({
+      familyId,
+      actorUserId: userId,
+      module: 'project',
+      action: 'create',
+      title: 'Caixinha Criada',
+      message: `${userName} criou a caixinha/meta '${name}'.`
+    });
 
     res.status(201).json({
       success: true,
@@ -256,6 +267,17 @@ router.post('/:id/deposit', requireAuth, async (req, res, next) => {
       );
     });
 
+    const userName = await getUserName(userId);
+    const formattedAmount = Number(amount).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    await notifyFamily({
+      familyId,
+      actorUserId: userId,
+      module: 'project',
+      action: 'update',
+      title: 'Aporte na Caixinha',
+      message: `${userName} realizou um aporte de ${formattedAmount} na caixinha.`
+    });
+
     res.json({
       success: true,
       message: 'Aporte de reserva realizado com sucesso. O saldo correspondente desta conta real foi reservado.'
@@ -354,6 +376,17 @@ router.post('/:id/withdraw', requireAuth, async (req, res, next) => {
       );
     });
 
+    const userName = await getUserName(userId);
+    const formattedAmount = Number(amount).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    await notifyFamily({
+      familyId,
+      actorUserId: userId,
+      module: 'project',
+      action: 'update',
+      title: 'Resgate da Caixinha',
+      message: `${userName} resgatou ${formattedAmount} de uma caixinha.`
+    });
+
     res.json({
       success: true,
       message: 'Resgate de reserva efetuado com sucesso. O valor foi creditado de volta ao saldo livre da sua conta real.'
@@ -418,6 +451,17 @@ router.put('/:id', requireAuth, async (req, res, next) => {
       return res.status(404).json({ error: 'NOT_FOUND', message: 'Projeto/meta não encontrado.' });
     }
 
+    const userId = req.session!.userId;
+    const userName = await getUserName(userId);
+    await notifyFamily({
+      familyId,
+      actorUserId: userId,
+      module: 'project',
+      action: 'update',
+      title: 'Caixinha Atualizada',
+      message: `${userName} atualizou as informações da caixinha '${name}'.`
+    });
+
     res.json({ success: true, message: 'Projeto atualizado com sucesso.' });
   } catch (err) {
     next(err);
@@ -441,6 +485,17 @@ router.delete('/:id', requireAuth, async (req, res, next) => {
     if ((result as any).affectedRows === 0) {
       return res.status(404).json({ error: 'NOT_FOUND', message: 'Projeto não encontrado.' });
     }
+
+    const userId = req.session!.userId;
+    const userName = await getUserName(userId);
+    await notifyFamily({
+      familyId,
+      actorUserId: userId,
+      module: 'project',
+      action: 'delete',
+      title: 'Caixinha Removida',
+      message: `${userName} excluiu uma caixinha da família.`
+    });
 
     res.json({ success: true, message: 'Projeto excluído com sucesso.' });
   } catch (err) {
