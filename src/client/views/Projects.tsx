@@ -9,7 +9,11 @@ import { formatCurrency, formatDate, normalizeDecimal } from '../utils/format';
 import { Account, Project, User } from '../../shared/types';
 import ConfirmModal from '../components/ConfirmModal';
 
-export default function Projects() {
+interface ProjectsProps {
+  currentUser?: User;
+}
+
+export default function Projects({ currentUser }: ProjectsProps) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -43,19 +47,29 @@ export default function Projects() {
   const [opDate, setOpDate] = useState(new Date().toISOString().split('T')[0]);
   const [opNotes, setOpNotes] = useState('');
 
+  const getActiveUserId = (userList: User[] = users) => {
+    if (currentUser?.id) return currentUser.id.toString();
+    if (userList && userList.length > 0) return userList[0].id.toString();
+    return '';
+  };
+
   const loadData = async () => {
     try {
-      const [projs, accs, usrs] = await Promise.all([
+      const [projs, accs, usrs, meRes] = await Promise.all([
         fetch('/api/projects').then(r => r.json()),
         fetch('/api/accounts').then(r => r.json()),
-        fetch('/api/users').then(r => r.json())
+        fetch('/api/users').then(r => r.json()),
+        currentUser ? Promise.resolve(null) : fetch('/api/auth/me').then(r => r.ok ? r.json() : null)
       ]);
 
       setProjects(projs || []);
       setAccounts(accs || []);
       setUsers(usrs || []);
 
-      if (usrs && usrs.length > 0 && !responsibleUserId) {
+      const activeUser = currentUser || meRes?.user;
+      if (activeUser && activeUser.id) {
+        setResponsibleUserId(activeUser.id.toString());
+      } else if (usrs && usrs.length > 0) {
         setResponsibleUserId(usrs[0].id.toString());
       }
     } catch (err) {
@@ -67,7 +81,7 @@ export default function Projects() {
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [currentUser]);
 
   const resetForm = () => {
     setEditingId(null);
@@ -78,9 +92,7 @@ export default function Projects() {
     setDeadline('');
     setNotes('');
     setError(null);
-    if (users.length > 0) {
-      setResponsibleUserId(users[0].id.toString());
-    }
+    setResponsibleUserId(getActiveUserId(users));
   };
 
   const handleStartEdit = (proj: Project) => {

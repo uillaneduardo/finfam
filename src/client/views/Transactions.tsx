@@ -9,7 +9,11 @@ import { formatCurrency, formatDate, normalizeDecimal } from '../utils/format';
 import { Account, Transaction, Category, Contact, User } from '../../shared/types';
 import ConfirmModal from '../components/ConfirmModal';
 
-export default function Transactions() {
+interface TransactionsProps {
+  currentUser?: User;
+}
+
+export default function Transactions({ currentUser }: TransactionsProps) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -39,6 +43,12 @@ export default function Transactions() {
   const [sourceAccountId, setSourceAccountId] = useState('');
   const [destinationAccountId, setDestinationAccountId] = useState('');
   const [responsibleUserId, setResponsibleUserId] = useState('');
+
+  const getActiveUserId = (userList: User[] = users) => {
+    if (currentUser?.id) return currentUser.id.toString();
+    if (userList && userList.length > 0) return userList[0].id.toString();
+    return '';
+  };
   
   // Optional fields state
   const [showDetails, setShowDetails] = useState(false);
@@ -58,9 +68,7 @@ export default function Transactions() {
     setTransactionDate(new Date().toISOString().split('T')[0]);
     setSourceAccountId('');
     setDestinationAccountId('');
-    if (users && users.length > 0) {
-      setResponsibleUserId(users[0].id.toString());
-    }
+    setResponsibleUserId(getActiveUserId(users));
     setCategoryId('');
     setContactId('');
     setNotes('');
@@ -106,12 +114,13 @@ export default function Transactions() {
 
   const loadData = async () => {
     try {
-      const [txs, accs, cats, conts, usrs] = await Promise.all([
+      const [txs, accs, cats, conts, usrs, meRes] = await Promise.all([
         fetch('/api/transactions').then(r => r.json()),
         fetch('/api/accounts').then(r => r.json()),
         fetch('/api/categories').then(r => r.json()),
         fetch('/api/contacts').then(r => r.json()),
-        fetch('/api/users').then(r => r.json())
+        fetch('/api/users').then(r => r.json()),
+        currentUser ? Promise.resolve(null) : fetch('/api/auth/me').then(r => r.ok ? r.json() : null)
       ]);
 
       setTransactions(txs || []);
@@ -120,7 +129,10 @@ export default function Transactions() {
       setContacts(conts || []);
       setUsers(usrs || []);
 
-      if (usrs && usrs.length > 0) {
+      const activeUser = currentUser || meRes?.user;
+      if (activeUser && activeUser.id) {
+        setResponsibleUserId(activeUser.id.toString());
+      } else if (usrs && usrs.length > 0) {
         setResponsibleUserId(usrs[0].id.toString());
       }
     } catch (err) {
@@ -132,7 +144,7 @@ export default function Transactions() {
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [currentUser]);
 
   const generateIdempotencyKey = (): string => {
     if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {

@@ -9,7 +9,11 @@ import { formatCurrency, formatDate, normalizeDecimal } from '../utils/format';
 import { Account, Commitment, Category, Contact, User } from '../../shared/types';
 import ConfirmModal from '../components/ConfirmModal';
 
-export default function Commitments() {
+interface CommitmentsProps {
+  currentUser?: User;
+}
+
+export default function Commitments({ currentUser }: CommitmentsProps) {
   const [commitments, setCommitments] = useState<Commitment[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -52,15 +56,19 @@ export default function Commitments() {
   const [payAmount, setPayAmount] = useState('');
   const [payNotes, setPayNotes] = useState('');
 
+  const getActiveUserId = (userList: User[] = users) => {
+    if (currentUser?.id) return currentUser.id.toString();
+    if (userList && userList.length > 0) return userList[0].id.toString();
+    return '';
+  };
+
   const resetForm = () => {
     setEditingId(null);
     setType('to_pay');
     setDescription('');
     setEstimatedAmount('');
     setDueDate('');
-    if (users && users.length > 0) {
-      setResponsibleUserId(users[0].id.toString());
-    }
+    setResponsibleUserId(getActiveUserId(users));
     setEstimatedAccountId('');
     setCategoryId('');
     setContactId('');
@@ -191,12 +199,13 @@ export default function Commitments() {
 
   const loadData = async () => {
     try {
-      const [comms, accs, cats, conts, usrs] = await Promise.all([
+      const [comms, accs, cats, conts, usrs, meRes] = await Promise.all([
         fetch('/api/commitments').then(r => r.json()),
         fetch('/api/accounts').then(r => r.json()),
         fetch('/api/categories').then(r => r.json()),
         fetch('/api/contacts').then(r => r.json()),
-        fetch('/api/users').then(r => r.json())
+        fetch('/api/users').then(r => r.json()),
+        currentUser ? Promise.resolve(null) : fetch('/api/auth/me').then(r => r.ok ? r.json() : null)
       ]);
 
       setCommitments(comms || []);
@@ -205,7 +214,10 @@ export default function Commitments() {
       setContacts(conts || []);
       setUsers(usrs || []);
 
-      if (usrs && usrs.length > 0) {
+      const activeUser = currentUser || meRes?.user;
+      if (activeUser && activeUser.id) {
+        setResponsibleUserId(activeUser.id.toString());
+      } else if (usrs && usrs.length > 0) {
         setResponsibleUserId(usrs[0].id.toString());
       }
     } catch (err) {
@@ -217,7 +229,7 @@ export default function Commitments() {
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [currentUser]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();

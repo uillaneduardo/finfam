@@ -93,13 +93,13 @@ export default function App() {
       case 'dashboard':
         return <Dashboard user={user} onNavigate={setActiveTab} />;
       case 'transactions':
-        return <Transactions />;
+        return <Transactions currentUser={user} />;
       case 'commitments':
-        return <Commitments />;
+        return <Commitments currentUser={user} />;
       case 'accounts':
         return <Accounts />;
       case 'projects':
-        return <Projects />;
+        return <Projects currentUser={user} />;
       case 'settings':
         return <Settings currentUser={user} />;
       default:
