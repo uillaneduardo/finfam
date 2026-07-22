@@ -4,6 +4,7 @@
  */
 
 import { query } from '../../database/db';
+import { sendPushToFamily } from './webPush.service';
 
 export type NotificationModule = 'account' | 'transaction' | 'commitment' | 'project' | 'contact' | 'category';
 export type NotificationAction = 'create' | 'update' | 'delete';
@@ -17,22 +18,52 @@ export interface NotifyParams {
   message: string;
 }
 
+function getModuleUrl(module: NotificationModule): string {
+  switch (module) {
+    case 'account': return '/accounts';
+    case 'transaction': return '/transactions';
+    case 'commitment': return '/commitments';
+    case 'project': return '/projects';
+    case 'contact': return '/settings';
+    case 'category': return '/settings';
+    default: return '/';
+  }
+}
+
 /**
- * Registra uma notificação de atividade para toda a família
+ * Registra uma notificação de atividade para toda a família e dispara o Web Push
  */
 export async function notifyFamily(params: NotifyParams): Promise<void> {
   try {
     const { familyId, actorUserId, module, action, title, message } = params;
-    await query(
+    const [result] = await query(
       `INSERT INTO \`notifications\` (\`family_id\`, \`actor_user_id\`, \`module\`, \`action\`, \`title\`, \`message\`)
        VALUES (?, ?, ?, ?, ?, ?)`,
       [familyId, actorUserId, module, action, title, message]
     );
+
+    const notificationId = (result as any)?.insertId;
+
+    // Dispara Web Push em segundo plano para os demais membros da família
+    sendPushToFamily({
+      familyId,
+      excludeUserId: actorUserId,
+      title,
+      body: message,
+      url: getModuleUrl(module),
+      tag: `finfam-${module}-${notificationId || Date.now()}`,
+      notificationId: notificationId ? Number(notificationId) : undefined,
+      module,
+      action
+    }).catch(err => {
+      console.error('❌ [WebPush] Erro assíncrono ao disparar push notification:', err);
+    });
   } catch (err) {
     console.error('❌ Falha ao gravar notificação da família:', err);
     // Não bloqueia a transação principal caso a gravação de notificação falhe
   }
 }
+
 
 /**
  * Busca o nome do usuário ativo para incluir no texto amigável da notificação

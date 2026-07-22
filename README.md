@@ -244,4 +244,46 @@ Manter cópias de segurança do banco de dados MySQL é vital para evitar perda 
 
 ---
 
+## 🔔 8. Notificações Web Push (VAPID)
+
+O FinFam conta com um canal complementar de **Web Push real**, permitindo que os membros da família recebam alertas na barra do sistema no celular (Android) e no computador mesmo quando a aplicação PWA estiver com a aba ou o aplicativo fechados.
+
+### 📐 Arquitetura do Web Push
+- **Complementar à Central Interna:** A tabela `notifications` continua sendo a fonte oficial de dados da aplicação. O envio Web Push é disparado de forma assíncrona logo após o registro da notificação.
+- **Tolerância a Falhas:** Caso o envio de um Push falhe (ex: dispositivo sem sinal ou VAPID sem internet), a transação principal no banco (lançamento, quitação, etc.) **NUNCA é interrompida**.
+- **Segurança & VAPID:** Utiliza chaves de criptografia VAPID no padrão Web Push. A chave privada VAPID fica estritamente no backend e nunca é exposta para o cliente.
+- **Múltiplos Dispositivos:** Cada usuário pode cadastrar múltiplos dispositivos (celulares, notebooks, tablets), sendo identificados de forma única por hash SHA-256 do endpoint.
+
+### 🔑 Como Gerar e Configurar as Chaves VAPID
+
+1. **Gerar Par de Chaves:** Execute o comando no terminal do projeto para gerar um par de chaves públicas/privadas VAPID:
+   ```bash
+   npx web-push generate-vapid-keys
+   ```
+
+2. **Adicionar ao Arquivo `.env`:** Copie o resultado gerado e insira no seu arquivo `.env`:
+   ```env
+   VAPID_SUBJECT=mailto:administrador@suadominio.com
+   VAPID_PUBLIC_KEY=SuaChavePublicaGeradaAqui...
+   VAPID_PRIVATE_KEY=SuaChavePrivadaGeradaAqui...
+   ```
+
+3. **Executar Migrações do Banco:** Garanta que a tabela `push_subscriptions` esteja criada:
+   ```bash
+   npm run db:migrate
+   ```
+
+### 📱 Requisitos de HTTPS e Testes no Android / PWA
+
+1. **Requisito de Origem Segura (HTTPS):** Os navegadores (em especial o Google Chrome no Android e o iOS Safari) **bloqueiam estritamente** o registro de Service Workers e Web Push se o site for acessado por HTTP inseguro (ex: `http://192.168.0.4:3000`).
+   - **Para Produção/Rede:** Acesse a aplicação utilizando HTTPS (ex: Cloud Run, Vercel, Nginx com certificado SSL ou Cloudflare).
+   - **Para Desenvolvimento Local no Celular (Workaround HTTP):** No Chrome do Android, acesse `chrome://flags/#unsafely-treat-insecure-origin-as-secure`, insira a URL `http://192.168.0.x:3000`, selecione `Enabled` e reinicie o navegador.
+
+2. **Ativação Explícita pelo Usuário:** Por boas práticas e requisitos das lojas/browsers, a permissão de notificação só é solicitada após **clique explícito do usuário** no botão "Ativar notificações neste aparelho" (disponível em **Configurações**).
+
+3. **Inscrição Automática ao Limpar:** Se um endpoint caducar ou for rejeitado com status HTTP 404/410 do serviço de push, o backend do FinFam automaticamente limpa o registro obsoleto da tabela `push_subscriptions`.
+
+---
+
 *O projeto FinFam está sob licença Apache-2.0. Consulte o time de engenharia e arquitetura para mais informações.*
+

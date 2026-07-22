@@ -64,45 +64,67 @@ self.addEventListener('fetch', (event) => {
   );
 });
 
+// Helper to ensure target URL is a safe internal relative path
+function getSafeRelativeUrl(inputUrl) {
+  if (!inputUrl || typeof inputUrl !== 'string') return '/';
+  const trimmed = inputUrl.trim();
+  if (trimmed.startsWith('/') && !trimmed.startsWith('//') && !trimmed.toLowerCase().startsWith('/\\')) {
+    return trimmed;
+  }
+  return '/';
+}
+
 // 4. Push Notification Event
 self.addEventListener('push', (event) => {
-  let data = { title: 'FinFam', body: 'Nova movimentação registrada pela família.' };
+  let payload = { title: 'FinFam', body: 'Você possui uma nova atualização financeira.', url: '/' };
+
   if (event.data) {
     try {
-      data = event.data.json();
+      payload = event.data.json();
     } catch (e) {
-      data.body = event.data.text();
+      payload.body = event.data.text();
     }
   }
 
+  const safeUrl = getSafeRelativeUrl(payload.url);
   const options = {
-    body: data.body || data.message,
-    icon: '/icons/favicon.svg',
+    body: payload.body || payload.message || 'Você possui uma nova atualização financeira.',
+    icon: '/icons/icon-192.png',
     badge: '/icons/favicon.svg',
     vibrate: [100, 50, 100],
+    tag: payload.tag || `finfam-push-${payload.notificationId || Date.now()}`,
     data: {
-      url: '/'
+      url: safeUrl,
+      notificationId: payload.notificationId,
+      module: payload.module
     }
   };
 
   event.waitUntil(
-    self.registration.showNotification(data.title || 'FinFam', options)
+    self.registration.showNotification(payload.title || 'FinFam', options)
   );
 });
 
 // 5. Notification Click Handler
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
+  const rawUrl = event.notification.data ? event.notification.data.url : '/';
+  const targetUrl = getSafeRelativeUrl(rawUrl);
+
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
       for (const client of clientList) {
         if ('focus' in client) {
+          if ('navigate' in client && typeof client.navigate === 'function') {
+            client.navigate(targetUrl);
+          }
           return client.focus();
         }
       }
       if (clients.openWindow) {
-        return clients.openWindow('/');
+        return clients.openWindow(targetUrl);
       }
     })
   );
 });
+

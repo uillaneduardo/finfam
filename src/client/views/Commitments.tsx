@@ -547,7 +547,7 @@ export default function Commitments({ currentUser }: CommitmentsProps) {
                 </span>
               </div>
               <span className="text-sm font-extrabold text-amber-950 font-mono bg-amber-100 px-2.5 py-1 rounded-lg">
-                Total: {formatCurrency((normalizeDecimal(estimatedAmount) || 0) * (Math.max(1, Number(recurrenceCount) || 1)))}
+                Total: {formatCurrency((Number(normalizeDecimal(estimatedAmount)) || 0) * (Math.max(1, Number(recurrenceCount) || 1)))}
               </span>
             </div>
           )}

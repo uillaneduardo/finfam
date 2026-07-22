@@ -268,3 +268,26 @@ export const categorySchema = z.object({
     message: 'Tipo de categoria inválido. Deve ser entrada, saída ou mista.'
   })
 });
+
+// 13. Schema: Inscrição Web Push
+export const pushSubscribeSchema = z.object({
+  endpoint: z.string({ message: 'Endpoint é obrigatório.' })
+    .trim()
+    .url('Endpoint deve ser uma URL válida.')
+    .max(2048, 'Endpoint muito longo.'),
+  expirationTime: z.number().nullable().optional(),
+  keys: z.object({
+    p256dh: z.string({ message: 'Chave p256dh é obrigatória.' }).trim().min(1, 'Chave p256dh não pode ser vazia.').max(255),
+    auth: z.string({ message: 'Chave auth é obrigatória.' }).trim().min(1, 'Chave auth não pode ser vazia.').max(255),
+  }, { message: 'Chaves de criptografia da inscrição são obrigatórias.' }),
+  deviceName: z.string().trim().max(100, 'Nome do dispositivo deve ter no máximo 100 caracteres.').optional().nullable(),
+});
+
+// 14. Schema: Desinscrição Web Push
+export const pushUnsubscribeSchema = z.object({
+  endpoint: z.string({ message: 'Endpoint é obrigatório.' })
+    .trim()
+    .url('Endpoint deve ser uma URL válida.')
+    .max(2048, 'Endpoint muito longo.')
+});
+

@@ -6,8 +6,126 @@
 import express from 'express';
 import { query } from '../../database/db';
 import { requireAuth } from '../../middleware/auth';
+import { pushSubscribeSchema, pushUnsubscribeSchema } from '../../schemas/validation.schemas';
+import { getVapidPublicKey, getVapidConfig, hashEndpoint } from './webPush.service';
 
 const router = express.Router();
+
+/**
+ * GET /api/notifications/push/public-key
+ * Retorna apenas a chave pública VAPID se o serviço estiver configurado
+ */
+router.get('/push/public-key', requireAuth, (req, res) => {
+  const publicKey = getVapidPublicKey();
+  if (!publicKey) {
+    return res.status(503).json({
+      error: 'NOT_CONFIGURED',
+      message: 'O serviço de Web Push não está configurado no servidor. Defina as variáveis VAPID no ambiente.'
+    });
+  }
+
+  res.json({ publicKey });
+});
+
+/**
+ * GET /api/notifications/push/status
+ * Retorna o status de configuração e quantidade de dispositivos inscritos pelo usuário
+ */
+router.get('/push/status', requireAuth, async (req, res, next) => {
+  const familyId = req.session!.familyId;
+  const userId = req.session!.userId;
+  const config = getVapidConfig();
+
+  try {
+    const [rows] = await query(
+      `SELECT COUNT(*) as count FROM \`push_subscriptions\` WHERE \`user_id\` = ? AND \`family_id\` = ?`,
+      [userId, familyId]
+    );
+
+    const count = (rows as any[])[0]?.count || 0;
+
+    res.json({
+      configured: config.configured,
+      subscribedDevices: Number(count)
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/notifications/push/subscribe
+ * Registra ou atualiza uma inscrição Web Push associada à sessão do usuário
+ */
+router.post('/push/subscribe', requireAuth, async (req, res, next) => {
+  const familyId = req.session!.familyId;
+  const userId = req.session!.userId;
+
+  try {
+    const data = pushSubscribeSchema.parse(req.body);
+    const endpointHash = hashEndpoint(data.endpoint);
+    const userAgent = (req.headers['user-agent'] || '').slice(0, 500);
+
+    await query(
+      `INSERT INTO \`push_subscriptions\` 
+        (\`family_id\`, \`user_id\`, \`endpoint\`, \`endpoint_hash\`, \`p256dh\`, \`auth\`, \`user_agent\`, \`device_name\`)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+        \`family_id\` = VALUES(\`family_id\`),
+        \`user_id\` = VALUES(\`user_id\`),
+        \`endpoint\` = VALUES(\`endpoint\`),
+        \`p256dh\` = VALUES(\`p256dh\`),
+        \`auth\` = VALUES(\`auth\`),
+        \`user_agent\` = VALUES(\`user_agent\`),
+        \`device_name\` = VALUES(\`device_name\`),
+        \`updated_at\` = CURRENT_TIMESTAMP`,
+      [
+        familyId,
+        userId,
+        data.endpoint,
+        endpointHash,
+        data.keys.p256dh,
+        data.keys.auth,
+        userAgent || null,
+        data.deviceName || null
+      ]
+    );
+
+    res.status(200).json({
+      success: true,
+      message: 'Inscrição de Web Push registrada com sucesso.'
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * DELETE /api/notifications/push/unsubscribe
+ * Remove uma inscrição Web Push pertencente ao usuário autenticado
+ */
+router.delete('/push/unsubscribe', requireAuth, async (req, res, next) => {
+  const familyId = req.session!.familyId;
+  const userId = req.session!.userId;
+
+  try {
+    const data = pushUnsubscribeSchema.parse(req.body);
+    const endpointHash = hashEndpoint(data.endpoint);
+
+    await query(
+      `DELETE FROM \`push_subscriptions\` 
+       WHERE \`endpoint_hash\` = ? AND \`user_id\` = ? AND \`family_id\` = ?`,
+      [endpointHash, userId, familyId]
+    );
+
+    res.json({
+      success: true,
+      message: 'Inscrição de Web Push removida com sucesso.'
+    });
+  } catch (err) {
+    next(err);
+  }
+});
 
 /**
  * GET /api/notifications

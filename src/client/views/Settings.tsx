@@ -4,9 +4,10 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Settings as SettingsIcon, Users, Tag, Plus, Check, ShieldAlert, AlertCircle, Pencil, Trash2, Contact as ContactIcon, Phone, FileText } from 'lucide-react';
+import { Settings as SettingsIcon, Users, Tag, Plus, Check, ShieldAlert, AlertCircle, Pencil, Trash2, Contact as ContactIcon, Phone, FileText, Bell, Smartphone, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
 import { Category, Contact, ContactType, User, UserRole, UserStatus } from '../../shared/types';
 import ConfirmModal from '../components/ConfirmModal';
+import { isWebPushSupported, getNotificationPermission, getPushStatus, getCurrentSubscription, enableWebPush, disableWebPush } from '../utils/webPush';
 
 interface SettingsProps {
   currentUser: any;
@@ -17,6 +18,37 @@ export default function Settings({ currentUser }: SettingsProps) {
   const [members, setMembers] = useState<User[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Web Push State
+  const [pushSupported, setPushSupported] = useState<boolean>(true);
+  const [pushPermission, setPushPermission] = useState<NotificationPermission | 'unsupported'>('default');
+  const [pushIsSubscribed, setPushIsSubscribed] = useState<boolean>(false);
+  const [pushDevicesCount, setPushDevicesCount] = useState<number>(0);
+  const [pushServerConfigured, setPushServerConfigured] = useState<boolean>(true);
+  const [pushActionLoading, setPushActionLoading] = useState<boolean>(false);
+  const [pushFeedback, setPushFeedback] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
+
+  const loadPushState = async () => {
+    const supported = isWebPushSupported();
+    setPushSupported(supported);
+    if (!supported) {
+      setPushPermission('unsupported');
+      return;
+    }
+
+    const perm = getNotificationPermission();
+    setPushPermission(perm);
+
+    const [statusData, sub] = await Promise.all([
+      getPushStatus(),
+      getCurrentSubscription()
+    ]);
+
+    setPushServerConfigured(statusData.configured);
+    setPushDevicesCount(statusData.subscribedDevices);
+    setPushIsSubscribed(!!sub);
+  };
+
   
   // Category Form & Edit State
   const [catName, setCatName] = useState('');
@@ -70,7 +102,30 @@ export default function Settings({ currentUser }: SettingsProps) {
 
   useEffect(() => {
     loadSettingsData();
+    loadPushState();
   }, []);
+
+  const handleToggleWebPush = async () => {
+    setPushFeedback(null);
+    setPushActionLoading(true);
+
+    try {
+      if (pushIsSubscribed) {
+        await disableWebPush();
+        setPushFeedback({ type: 'info', text: 'Notificações Web Push desativadas para este aparelho.' });
+      } else {
+        await enableWebPush();
+        setPushFeedback({ type: 'success', text: 'Notificações Web Push ativadas com sucesso neste aparelho!' });
+      }
+      await loadPushState();
+    } catch (err: any) {
+      setPushFeedback({ type: 'error', text: err.message || 'Erro ao alterar estado das notificações Web Push.' });
+      await loadPushState();
+    } finally {
+      setPushActionLoading(false);
+    }
+  };
+
 
   const resetCatForm = () => {
     setEditingCatId(null);
@@ -728,7 +783,111 @@ export default function Settings({ currentUser }: SettingsProps) {
         </div>
       </div>
 
+      {/* Seção de Notificações Web Push neste Aparelho */}
+      <div className="bg-white p-6 rounded-2xl shadow-xs border border-slate-200/80 space-y-4">
+        <div className="flex items-center space-x-2 pb-3 border-b border-slate-100">
+          <Bell className="w-5 h-5 text-amber-500" />
+          <h3 className="text-sm font-bold text-slate-900">Notificações neste Aparelho (Web Push)</h3>
+        </div>
+
+        {!pushSupported ? (
+          <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-start space-x-2 text-amber-900 text-xs">
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+            <span>Este navegador ou sistema operacional não possui suporte a notificações Web Push.</span>
+          </div>
+        ) : !pushServerConfigured ? (
+          <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-start space-x-2 text-amber-900 text-xs">
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+            <span>O serviço de Web Push não está configurado no servidor (chaves VAPID ausentes). Defina as variáveis de ambiente no servidor.</span>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-slate-50 rounded-xl border border-slate-100">
+              <div className="flex items-start space-x-3">
+                <div className="p-2 rounded-lg bg-white border border-slate-200 shrink-0">
+                  <Smartphone className="w-5 h-5 text-slate-700" />
+                </div>
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <span className="text-xs font-bold text-slate-900">Status no Aparelho</span>
+                    {pushIsSubscribed ? (
+                      <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center space-x-1">
+                        <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                        <span>Ativo neste dispositivo</span>
+                      </span>
+                    ) : pushPermission === 'denied' ? (
+                      <span className="bg-rose-100 text-rose-800 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center space-x-1">
+                        <XCircle className="w-3 h-3 text-rose-600" />
+                        <span>Bloqueado no navegador</span>
+                      </span>
+                    ) : (
+                      <span className="bg-slate-200 text-slate-700 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                        Inativo neste dispositivo
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1">
+                    {pushIsSubscribed
+                      ? 'Você receberá alertas na barra do seu sistema mesmo se o navegador estiver fechado.'
+                      : pushPermission === 'denied'
+                      ? 'Para ativar, você precisará liberar as notificações nas permissões do site no seu navegador.'
+                      : 'Ative para receber avisos sobre movimentações e contas da família diretamente na barra do seu celular/computador.'}
+                  </p>
+                  <p className="text-[11px] font-mono text-slate-400 mt-1">
+                    Dispositivos da sua conta inscritos em Web Push: <strong className="text-slate-700">{pushDevicesCount}</strong>
+                  </p>
+                </div>
+              </div>
+
+              <div className="shrink-0 self-start sm:self-center">
+                <button
+                  type="button"
+                  onClick={handleToggleWebPush}
+                  disabled={pushActionLoading || pushPermission === 'denied'}
+                  className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center space-x-2 shadow-xs ${
+                    pushIsSubscribed
+                      ? 'bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200'
+                      : 'bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-50'
+                  }`}
+                >
+                  {pushActionLoading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Processando...</span>
+                    </>
+                  ) : pushIsSubscribed ? (
+                    <span>Desativar neste aparelho</span>
+                  ) : (
+                    <span>Ativar notificações neste aparelho</span>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {pushFeedback && (
+              <div
+                className={`p-3 rounded-xl text-xs flex items-center space-x-2 ${
+                  pushFeedback.type === 'success'
+                    ? 'bg-emerald-50 border border-emerald-200 text-emerald-900'
+                    : pushFeedback.type === 'error'
+                    ? 'bg-rose-50 border border-rose-200 text-rose-900'
+                    : 'bg-blue-50 border border-blue-200 text-blue-900'
+                }`}
+              >
+                {pushFeedback.type === 'success' ? (
+                  <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                )}
+                <span>{pushFeedback.text}</span>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       <ConfirmModal
+
         isOpen={!!deletingCat}
         title="Confirmar Exclusão de Categoria"
         message={
