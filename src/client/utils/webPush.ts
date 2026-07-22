@@ -68,6 +68,31 @@ export async function getCurrentSubscription(): Promise<PushSubscription | null>
 }
 
 /**
+ * Gera um nome amigável e legível para o dispositivo atual baseado na User Agent
+ */
+export function getFriendlyDeviceName(): string {
+  if (typeof navigator === 'undefined') return 'Dispositivo';
+  const ua = navigator.userAgent || '';
+  let browser = 'Navegador';
+  let os = 'Dispositivo';
+
+  if (ua.includes('Android')) os = 'Android';
+  else if (ua.includes('iPhone')) os = 'iPhone';
+  else if (ua.includes('iPad')) os = 'iPad';
+  else if (ua.includes('Windows')) os = 'Windows';
+  else if (ua.includes('Macintosh') || ua.includes('Mac OS')) os = 'macOS';
+  else if (ua.includes('Linux')) os = 'Linux';
+
+  if (ua.includes('Chrome') || ua.includes('CriOS')) browser = 'Chrome';
+  else if (ua.includes('Safari') && !ua.includes('Chrome')) browser = 'Safari';
+  else if (ua.includes('Firefox') || ua.includes('FxiOS')) browser = 'Firefox';
+  else if (ua.includes('Edg')) browser = 'Edge';
+
+  const name = `${browser} (${os})`;
+  return name.slice(0, 80);
+}
+
+/**
  * Ativa as notificações Web Push no dispositivo atual após ação explícita do usuário
  */
 export async function enableWebPush(deviceName?: string): Promise<{ success: boolean; subscription: PushSubscription }> {
@@ -108,6 +133,8 @@ export async function enableWebPush(deviceName?: string): Promise<{ success: boo
 
   // 5. Envia / sincroniza os dados da inscrição com o servidor
   const subJson = sub.toJSON();
+  const calculatedDeviceName = (deviceName || getFriendlyDeviceName()).slice(0, 90);
+
   const subRes = await fetch('/api/notifications/push/subscribe', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -115,13 +142,23 @@ export async function enableWebPush(deviceName?: string): Promise<{ success: boo
       endpoint: sub.endpoint,
       expirationTime: sub.expirationTime || null,
       keys: subJson.keys,
-      deviceName: deviceName || (typeof navigator !== 'undefined' ? navigator.userAgent : null),
+      deviceName: calculatedDeviceName,
     }),
   });
 
   if (!subRes.ok) {
     const subErr = await subRes.json().catch(() => ({}));
-    throw new Error(subErr.message || 'Erro ao registrar a inscrição no servidor.');
+    let errMsg = 'Erro ao registrar a inscrição no servidor.';
+    
+    if (typeof subErr.message === 'string') {
+      errMsg = subErr.message;
+    } else if (Array.isArray(subErr.error) && subErr.error[0]?.message) {
+      errMsg = subErr.error[0].message;
+    } else if (Array.isArray(subErr) && subErr[0]?.message) {
+      errMsg = subErr[0].message;
+    }
+
+    throw new Error(errMsg);
   }
 
   return { success: true, subscription: sub };

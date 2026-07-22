@@ -65,6 +65,7 @@ router.post('/push/subscribe', requireAuth, async (req, res, next) => {
     const data = pushSubscribeSchema.parse(req.body);
     const endpointHash = hashEndpoint(data.endpoint);
     const userAgent = (req.headers['user-agent'] || '').slice(0, 500);
+    const deviceName = data.deviceName ? data.deviceName.slice(0, 100) : null;
 
     await query(
       `INSERT INTO \`push_subscriptions\` 
@@ -87,7 +88,7 @@ router.post('/push/subscribe', requireAuth, async (req, res, next) => {
         data.keys.p256dh,
         data.keys.auth,
         userAgent || null,
-        data.deviceName || null
+        deviceName
       ]
     );
 

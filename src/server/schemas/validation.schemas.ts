@@ -280,7 +280,7 @@ export const pushSubscribeSchema = z.object({
     p256dh: z.string({ message: 'Chave p256dh é obrigatória.' }).trim().min(1, 'Chave p256dh não pode ser vazia.').max(255),
     auth: z.string({ message: 'Chave auth é obrigatória.' }).trim().min(1, 'Chave auth não pode ser vazia.').max(255),
   }, { message: 'Chaves de criptografia da inscrição são obrigatórias.' }),
-  deviceName: z.string().trim().max(100, 'Nome do dispositivo deve ter no máximo 100 caracteres.').optional().nullable(),
+  deviceName: z.string().trim().max(255, 'Nome do dispositivo deve ter no máximo 255 caracteres.').optional().nullable(),
 });
 
 // 14. Schema: Desinscrição Web Push
