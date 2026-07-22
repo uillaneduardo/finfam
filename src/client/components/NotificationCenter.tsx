@@ -30,6 +30,42 @@ export default function NotificationCenter() {
 
   const prevUnreadCountRef = useRef<number>(0);
 
+  const sendDeviceNotification = async (title: string, message: string) => {
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    if (Notification.permission !== 'granted') return;
+
+    const options = {
+      body: message,
+      icon: '/icons/favicon.svg',
+      badge: '/icons/favicon.svg',
+      vibrate: [200, 100, 200],
+      tag: `finfam-notif-${Date.now()}`,
+      renotify: true,
+      data: { url: '/' }
+    };
+
+    // On Android/Mobile browsers & PWAs, direct 'new Notification()' is blocked or ignored.
+    // Using ServiceWorkerRegistration.showNotification puts the notification directly into the device notification bar.
+    if ('serviceWorker' in navigator) {
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        if (reg && reg.showNotification) {
+          await reg.showNotification(title, options);
+          return;
+        }
+      } catch (e) {
+        console.warn('Erro ao disparar notificação via ServiceWorker, tentando fallback:', e);
+      }
+    }
+
+    // Fallback for desktop browsers when SW is not active
+    try {
+      new Notification(title, options);
+    } catch (e) {
+      console.warn('Erro na notificação de fallback:', e);
+    }
+  };
+
   const fetchNotifications = async (isInitial = false) => {
     try {
       if (isInitial) setLoading(true);
@@ -39,14 +75,11 @@ export default function NotificationCenter() {
         const newNotifications: NotificationItem[] = data.notifications || [];
         const newUnread: number = data.unreadCount || 0;
 
-        // Trigger native notification if new unread notification arrives
+        // Trigger native notification on device status bar if new unread notification arrives
         if (!isInitial && newUnread > prevUnreadCountRef.current && Notification.permission === 'granted') {
           const newest = newNotifications[0];
           if (newest && newest.is_read === 0) {
-            new Notification(newest.title, {
-              body: newest.message,
-              icon: '/icons/favicon.svg'
-            });
+            sendDeviceNotification(newest.title, newest.message);
           }
         }
 
@@ -118,10 +151,7 @@ export default function NotificationCenter() {
       const result = await Notification.requestPermission();
       setPermission(result);
       if (result === 'granted') {
-        new Notification('FinFam Conectado', {
-          body: 'Notificações de alterações da família ativadas com sucesso!',
-          icon: '/icons/favicon.svg'
-        });
+        sendDeviceNotification('FinFam Conectado', 'Notificações de alterações da família ativadas no seu aparelho!');
       }
     } catch (err) {
       console.error('Erro ao solicitar permissão de notificação:', err);
@@ -193,17 +223,32 @@ export default function NotificationCenter() {
               )}
             </div>
 
-            {/* Browser Permission Banner if not granted */}
-            {permission !== 'granted' && (
+            {/* Browser Permission Banner */}
+            {permission !== 'granted' ? (
               <div className="p-3 bg-amber-50 border-b border-amber-200/60 flex items-center justify-between">
                 <p className="text-[11px] text-amber-900 font-medium leading-tight">
-                  Receba alertas no aparelho quando a família fizer lançamentos.
+                  Receba alertas na barra do seu celular/aparelho quando a família fizer lançamentos.
                 </p>
                 <button
                   onClick={requestNotificationPermission}
                   className="ml-2 px-2.5 py-1 bg-amber-400 hover:bg-amber-500 text-slate-950 font-bold text-[10px] rounded-lg shadow-xs shrink-0 transition-all"
                 >
                   Ativar
+                </button>
+              </div>
+            ) : (
+              <div className="p-2.5 bg-emerald-50 border-b border-emerald-200/60 flex items-center justify-between">
+                <div className="flex items-center space-x-2 text-emerald-900">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
+                  <p className="text-[11px] font-medium leading-tight">
+                    Alertas no aparelho <strong>Ativados</strong>.
+                  </p>
+                </div>
+                <button
+                  onClick={() => sendDeviceNotification('FinFam Teste', 'Notificação de teste enviada para a barra de notificações do seu aparelho!')}
+                  className="ml-2 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] rounded-lg shrink-0 transition-all shadow-xs"
+                >
+                  Testar Alerta
                 </button>
               </div>
             )}
