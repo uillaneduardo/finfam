@@ -141,9 +141,29 @@ export default function NotificationCenter() {
     }
   };
 
+  const [isSecureContext, setIsSecureContext] = useState<boolean>(true);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const secure = window.isSecureContext || window.location.protocol === 'https:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      setIsSecureContext(secure);
+    }
+  }, []);
+
   const requestNotificationPermission = async () => {
     if (!('Notification' in window)) {
       alert('Seu navegador não suporta notificações de área de trabalho.');
+      return;
+    }
+
+    if (!isSecureContext) {
+      alert(
+        '⚠️ O Google Chrome no celular bloqueia notificações quando o site é acessado por HTTP (http://192.168.0.4:3000).\n\n' +
+        'Para liberar as notificações no celular:\n\n' +
+        '1. Acesse o aplicativo utilizando o endereço HTTPS (link do Cloud Run / Vercel / Domínio seguro);\n' +
+        'OU\n' +
+        '2. No Chrome do celular da sua esposa, acesse a página: chrome://flags/#unsafely-treat-insecure-origin-as-secure, adicione "http://192.168.0.4:3000", selecione "Enabled" e reinicie o Chrome.'
+      );
       return;
     }
 
@@ -224,7 +244,22 @@ export default function NotificationCenter() {
             </div>
 
             {/* Browser Permission Banner */}
-            {permission !== 'granted' ? (
+            {!isSecureContext ? (
+              <div className="p-3 bg-rose-50 border-b border-rose-200/80 flex flex-col space-y-1.5">
+                <div className="flex items-center space-x-1.5 text-rose-900 font-semibold text-xs">
+                  <span>⚠️ Conexão Insegura (HTTP)</span>
+                </div>
+                <p className="text-[11px] text-rose-800 leading-tight">
+                  O Chrome no celular bloqueia notificações quando o endereço é <strong>HTTP ({typeof window !== 'undefined' ? window.location.hostname : 'IP local'})</strong>.
+                </p>
+                <button
+                  onClick={requestNotificationPermission}
+                  className="mt-0.5 px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white font-bold text-[10px] rounded-lg shadow-xs self-start transition-all"
+                >
+                  Ver como liberar no Chrome
+                </button>
+              </div>
+            ) : permission !== 'granted' ? (
               <div className="p-3 bg-amber-50 border-b border-amber-200/60 flex items-center justify-between">
                 <p className="text-[11px] text-amber-900 font-medium leading-tight">
                   Receba alertas na barra do seu celular/aparelho quando a família fizer lançamentos.
