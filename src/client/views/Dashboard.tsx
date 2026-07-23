@@ -5,7 +5,7 @@
 
 import { useState, useEffect } from 'react';
 import { Wallet, ShieldAlert, Sparkles, TrendingUp, AlertCircle, Bookmark } from 'lucide-react';
-import { formatCurrency, formatDate } from '../utils/format';
+import { formatCurrency, formatDate, formatTransactionDateTime } from '../utils/format';
 import { Account, Transaction, Commitment, Project } from '../../shared/types';
 
 interface DashboardProps {
@@ -225,7 +225,7 @@ export default function Dashboard({ user, onNavigate }: DashboardProps) {
                     <div className="min-w-0">
                       <p className="text-xs font-semibold text-slate-900 truncate leading-snug">{tx.description}</p>
                       <span className="text-[10px] text-slate-500 font-mono block">
-                        {formatDate(tx.transaction_date)} • {tx.type === 'income' ? 'Entrada' : tx.type === 'expense' ? 'Saída' : 'Transferência'}
+                        {formatTransactionDateTime(tx)} • {tx.type === 'income' ? 'Entrada' : tx.type === 'expense' ? 'Saída' : 'Transferência'}
                       </span>
                     </div>
                   </div>

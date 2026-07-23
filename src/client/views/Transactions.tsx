@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { ArrowUpRight, ArrowDownLeft, RefreshCw, AlertCircle, Plus, Sparkles, Filter, Pencil, Trash2 } from 'lucide-react';
-import { formatCurrency, formatDate, normalizeDecimal } from '../utils/format';
+import { formatCurrency, formatDate, formatTransactionDateTime, normalizeDecimal } from '../utils/format';
 import { Account, Transaction, Category, Contact, User } from '../../shared/types';
 import ConfirmModal from '../components/ConfirmModal';
 
@@ -659,7 +659,7 @@ export default function Transactions({ currentUser }: TransactionsProps) {
                     <div className="min-w-0">
                       <h4 className="text-xs font-bold text-slate-900 truncate leading-snug">{tx.description}</h4>
                       <p className="text-[10px] text-slate-500 font-mono mt-0.5 leading-relaxed">
-                        {formatDate(tx.transaction_date)} • Responsável: <strong className="font-semibold">{respUserName}</strong>
+                        {formatTransactionDateTime(tx)} • Responsável: <strong className="font-semibold">{respUserName}</strong>
                         {tx.type === 'expense' && sourceAccName && ` • Pago via ${sourceAccName}`}
                         {tx.type === 'income' && destAccName && ` • Depositado em ${destAccName}`}
                         {tx.type === 'transfer' && ` • Mapeado de ${sourceAccName} para ${destAccName}`}
