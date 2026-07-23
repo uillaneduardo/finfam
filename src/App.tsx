@@ -144,85 +144,87 @@ export default function App() {
       </header>
 
       {/* Main Container Layout */}
-      <div className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-col md:flex-row gap-6">
+      <div className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-3 sm:py-6 flex flex-col md:flex-row gap-3 sm:gap-6">
         {/* Sidebar Responsive Menu */}
-        <aside id="main-sidebar" className="w-full md:w-64 shrink-0 bg-white border border-slate-200/50 rounded-2xl p-4 h-fit space-y-2 shadow-sm">
-          <button
-            onClick={() => setActiveTab('dashboard')}
-            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-xs font-bold transition-all ${
-              activeTab === 'dashboard' 
-                ? 'bg-slate-900 text-white shadow-sm' 
-                : 'text-slate-600 hover:bg-slate-100'
-            }`}
-          >
-            <LayoutDashboard className="w-4 h-4 shrink-0" />
-            <span>Painel Visão Geral</span>
-          </button>
+        <aside id="main-sidebar" className="w-full md:w-64 shrink-0 bg-white border border-slate-200/50 rounded-2xl p-2 sm:p-4 h-fit shadow-sm">
+          <div className="flex flex-row md:flex-col overflow-x-auto md:overflow-visible gap-1 sm:gap-2 py-0.5 no-scrollbar">
+            <button
+              onClick={() => setActiveTab('dashboard')}
+              className={`shrink-0 flex items-center space-x-2 px-3 py-2 sm:px-4 sm:py-3 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeTab === 'dashboard' 
+                  ? 'bg-slate-900 text-white shadow-sm' 
+                  : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              <LayoutDashboard className="w-4 h-4 shrink-0" />
+              <span>Painel Visão Geral</span>
+            </button>
 
-          <button
-            onClick={() => setActiveTab('transactions')}
-            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-xs font-bold transition-all ${
-              activeTab === 'transactions' 
-                ? 'bg-slate-900 text-white shadow-sm' 
-                : 'text-slate-600 hover:bg-slate-100'
-            }`}
-          >
-            <Receipt className="w-4 h-4 shrink-0" />
-            <span>Lançamentos</span>
-          </button>
+            <button
+              onClick={() => setActiveTab('transactions')}
+              className={`shrink-0 flex items-center space-x-2 px-3 py-2 sm:px-4 sm:py-3 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeTab === 'transactions' 
+                  ? 'bg-slate-900 text-white shadow-sm' 
+                  : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              <Receipt className="w-4 h-4 shrink-0" />
+              <span>Lançamentos</span>
+            </button>
 
-          <button
-            onClick={() => setActiveTab('commitments')}
-            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-xs font-bold transition-all ${
-              activeTab === 'commitments' 
-                ? 'bg-slate-900 text-white shadow-sm' 
-                : 'text-slate-600 hover:bg-slate-100'
-            }`}
-          >
-            <CalendarClock className="w-4 h-4 shrink-0" />
-            <span>Compromissos</span>
-          </button>
+            <button
+              onClick={() => setActiveTab('commitments')}
+              className={`shrink-0 flex items-center space-x-2 px-3 py-2 sm:px-4 sm:py-3 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeTab === 'commitments' 
+                  ? 'bg-slate-900 text-white shadow-sm' 
+                  : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              <CalendarClock className="w-4 h-4 shrink-0" />
+              <span>Compromissos</span>
+            </button>
 
-          <button
-            onClick={() => setActiveTab('accounts')}
-            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-xs font-bold transition-all ${
-              activeTab === 'accounts' 
-                ? 'bg-slate-900 text-white shadow-sm' 
-                : 'text-slate-600 hover:bg-slate-100'
-            }`}
-          >
-            <Wallet className="w-4 h-4 shrink-0" />
-            <span>Contas Financeiras</span>
-          </button>
+            <button
+              onClick={() => setActiveTab('accounts')}
+              className={`shrink-0 flex items-center space-x-2 px-3 py-2 sm:px-4 sm:py-3 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeTab === 'accounts' 
+                  ? 'bg-slate-900 text-white shadow-sm' 
+                  : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              <Wallet className="w-4 h-4 shrink-0" />
+              <span>Contas Financeiras</span>
+            </button>
 
-          <button
-            onClick={() => setActiveTab('projects')}
-            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-xs font-bold transition-all ${
-              activeTab === 'projects' 
-                ? 'bg-slate-900 text-white shadow-sm' 
-                : 'text-slate-600 hover:bg-slate-100'
-            }`}
-          >
-            <Target className="w-4 h-4 shrink-0" />
-            <span>Reservas / Caixinhas</span>
-          </button>
+            <button
+              onClick={() => setActiveTab('projects')}
+              className={`shrink-0 flex items-center space-x-2 px-3 py-2 sm:px-4 sm:py-3 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeTab === 'projects' 
+                  ? 'bg-slate-900 text-white shadow-sm' 
+                  : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              <Target className="w-4 h-4 shrink-0" />
+              <span>Reservas / Caixinhas</span>
+            </button>
 
-          <button
-            onClick={() => setActiveTab('settings')}
-            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-xs font-bold transition-all ${
-              activeTab === 'settings' 
-                ? 'bg-slate-900 text-white shadow-sm' 
-                : 'text-slate-600 hover:bg-slate-100'
-            }`}
-          >
-            <SettingsIcon className="w-4 h-4 shrink-0" />
-            <span>Configurações</span>
-          </button>
+            <button
+              onClick={() => setActiveTab('settings')}
+              className={`shrink-0 flex items-center space-x-2 px-3 py-2 sm:px-4 sm:py-3 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeTab === 'settings' 
+                  ? 'bg-slate-900 text-white shadow-sm' 
+                  : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              <SettingsIcon className="w-4 h-4 shrink-0" />
+              <span>Configurações</span>
+            </button>
+          </div>
         </aside>
 
         {/* Content Dynamic Workspace Stage */}
         <main id="main-content-stage" className="flex-1 min-w-0">
-          <div className="bg-white border border-slate-150 rounded-2xl p-6 shadow-sm min-h-[500px]">
+          <div className="bg-white border border-slate-150 rounded-2xl p-3 sm:p-6 shadow-sm min-h-[400px]">
             {renderTabView()}
           </div>
         </main>

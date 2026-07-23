@@ -9,7 +9,7 @@
   "display_override": ["standalone", "fullscreen", "minimal-ui"],
   "background_color": "#0f172a",
   "theme_color": "#0f172a",
-  "orientation": "portrait",
+  "orientation": "any",
   "categories": ["finance", "utilities"],
   "prefer_related_applications": false,
   "icons": [
