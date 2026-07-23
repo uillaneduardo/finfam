@@ -4,10 +4,11 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { CalendarClock, Plus, CheckCircle, AlertTriangle, Sparkles, Filter, X, Pencil, Trash2 } from 'lucide-react';
+import { CalendarClock, Plus, CheckCircle, AlertTriangle, Sparkles, Filter, X, Pencil, Trash2, Calendar as CalendarIcon, List as ListIcon } from 'lucide-react';
 import { formatCurrency, formatDate, normalizeDecimal } from '../utils/format';
 import { Account, Commitment, Category, Contact, User } from '../../shared/types';
 import ConfirmModal from '../components/ConfirmModal';
+import CommitmentCalendar from '../components/CommitmentCalendar';
 
 interface CommitmentsProps {
   currentUser?: User;
@@ -34,6 +35,9 @@ export default function Commitments({ currentUser }: CommitmentsProps) {
   const [deletingCommitment, setDeletingCommitment] = useState<Commitment | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
+  // View mode: 'calendar' (visual) or 'list' (tabular)
+  const [viewMode, setViewMode] = useState<'calendar' | 'list'>('calendar');
+
   // Filter state (all, today, week, month, overdue)
   const [filterPeriod, setFilterPeriod] = useState<string>('all');
 
@@ -55,6 +59,26 @@ export default function Commitments({ currentUser }: CommitmentsProps) {
   const [payDate, setPayDate] = useState(new Date().toISOString().split('T')[0]);
   const [payAmount, setPayAmount] = useState('');
   const [payNotes, setPayNotes] = useState('');
+
+  const handleNewForDate = (dateStr: string) => {
+    setEditingId(null);
+    setDescription('');
+    setEstimatedAmount('');
+    setDueDate(dateStr);
+    setEstimatedAccountId('');
+    setCategoryId('');
+    setContactId('');
+    setNotes('');
+    setRecurrenceType('none');
+    setShowForm(true);
+
+    setTimeout(() => {
+      const formEl = document.getElementById('commitment-entry-form');
+      if (formEl) {
+        formEl.scrollIntoView({ behavior: 'smooth' });
+      }
+    }, 50);
+  };
 
   const getActiveUserId = (userList: User[] = users) => {
     if (currentUser?.id) return currentUser.id.toString();
@@ -386,14 +410,42 @@ export default function Commitments({ currentUser }: CommitmentsProps) {
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Compromissos</h1>
           <p className="text-slate-500 text-sm">Controle de contas a pagar e receber recorrentes e futuras.</p>
         </div>
-        <button
-          id="toggle-commitment-form-btn"
-          onClick={() => setShowForm(!showForm)}
-          className="flex items-center justify-center space-x-1.5 px-4 py-2.5 bg-slate-900 text-white rounded-xl text-sm font-medium hover:bg-slate-800 transition-all shadow-sm self-start"
-        >
-          <Plus className="w-4 h-4" />
-          <span>{showForm ? 'Fechar Formulário' : 'Novo Agendamento'}</span>
-        </button>
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          {/* View Mode Switcher */}
+          <div className="bg-slate-100 p-1 rounded-xl flex items-center space-x-1 border border-slate-200/60">
+            <button
+              onClick={() => setViewMode('calendar')}
+              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                viewMode === 'calendar'
+                  ? 'bg-white text-slate-900 shadow-xs font-bold'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <CalendarIcon className="w-3.5 h-3.5" />
+              <span>Calendário</span>
+            </button>
+            <button
+              onClick={() => setViewMode('list')}
+              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                viewMode === 'list'
+                  ? 'bg-white text-slate-900 shadow-xs font-bold'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <ListIcon className="w-3.5 h-3.5" />
+              <span>Lista</span>
+            </button>
+          </div>
+
+          <button
+            id="toggle-commitment-form-btn"
+            onClick={() => setShowForm(!showForm)}
+            className="flex items-center justify-center space-x-1.5 px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-semibold hover:bg-slate-800 transition-all shadow-sm"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>{showForm ? 'Fechar' : 'Novo Agendamento'}</span>
+          </button>
+        </div>
       </div>
 
       {/* New Commitment Form */}
@@ -644,145 +696,160 @@ export default function Commitments({ currentUser }: CommitmentsProps) {
         </form>
       )}
 
-      {/* Time Horizon Filter tabs */}
-      <div id="comm-filters-panel" className="bg-slate-100/60 border border-slate-200/50 rounded-2xl p-2.5 flex flex-wrap gap-2">
-        <button
-          onClick={() => setFilterPeriod('all')}
-          className={`px-4 py-2 rounded-xl text-xs font-medium transition-all ${
-            filterPeriod === 'all' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200/50'
-          }`}
-        >
-          Todos os Compromissos
-        </button>
-        <button
-          onClick={() => setFilterPeriod('overdue')}
-          className={`px-4 py-2 rounded-xl text-xs font-medium transition-all flex items-center space-x-1 ${
-            filterPeriod === 'overdue' ? 'bg-rose-600 text-white shadow-sm' : 'text-rose-700 bg-rose-50 hover:bg-rose-100'
-          }`}
-        >
-          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-          <span>Atrasados</span>
-        </button>
-        <button
-          onClick={() => setFilterPeriod('today')}
-          className={`px-4 py-2 rounded-xl text-xs font-medium transition-all ${
-            filterPeriod === 'today' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200/50'
-          }`}
-        >
-          Vence Hoje
-        </button>
-        <button
-          onClick={() => setFilterPeriod('week')}
-          className={`px-4 py-2 rounded-xl text-xs font-medium transition-all ${
-            filterPeriod === 'week' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200/50'
-          }`}
-        >
-          Próximos 7 Dias
-        </button>
-        <button
-          onClick={() => setFilterPeriod('month')}
-          className={`px-4 py-2 rounded-xl text-xs font-medium transition-all ${
-            filterPeriod === 'month' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200/50'
-          }`}
-        >
-          Próximos 30 Dias
-        </button>
-      </div>
-
-      {/* Main Commitments List */}
-      {filteredCommitments.length === 0 ? (
-        <div id="comm-empty-state" className="bg-white border border-slate-100 rounded-2xl p-12 text-center shadow-sm">
-          <CalendarClock className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-          <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">Nenhum compromisso agendado</h3>
-          <p className="text-slate-500 text-xs mt-1.5 max-w-sm mx-auto">
-            Não existem faturas, boletos ou cobranças pendentes de liquidação para este período.
-          </p>
-          <button
-            onClick={() => setShowForm(true)}
-            className="mt-4 px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-semibold hover:bg-slate-800 transition-colors"
-          >
-            Agendar Novo Lançamento Futuro
-          </button>
-        </div>
+      {/* Calendar or List View */}
+      {viewMode === 'calendar' ? (
+        <CommitmentCalendar
+          commitments={commitments}
+          users={users}
+          accounts={accounts}
+          onPay={startPayment}
+          onEdit={handleStartEdit}
+          onDelete={(comm) => setDeletingCommitment(comm)}
+          onNewForDate={handleNewForDate}
+        />
       ) : (
-        <div id="commitments-list-container" className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden divide-y divide-slate-100">
-          {filteredCommitments.map(comm => {
-            const isOverdue = comm.status === 'pending' && comm.due_date < new Date().toISOString().split('T')[0];
-            const respUser = users.find(u => u.id === comm.responsible_user_id)?.name;
-            const estAccName = accounts.find(a => a.id === comm.estimated_account_id)?.name;
+        <>
+          {/* Time Horizon Filter tabs */}
+          <div id="comm-filters-panel" className="bg-slate-100/60 border border-slate-200/50 rounded-2xl p-2.5 flex flex-wrap gap-2">
+            <button
+              onClick={() => setFilterPeriod('all')}
+              className={`px-4 py-2 rounded-xl text-xs font-medium transition-all ${
+                filterPeriod === 'all' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200/50'
+              }`}
+            >
+              Todos os Compromissos
+            </button>
+            <button
+              onClick={() => setFilterPeriod('overdue')}
+              className={`px-4 py-2 rounded-xl text-xs font-medium transition-all flex items-center space-x-1 ${
+                filterPeriod === 'overdue' ? 'bg-rose-600 text-white shadow-sm' : 'text-rose-700 bg-rose-50 hover:bg-rose-100'
+              }`}
+            >
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+              <span>Atrasados</span>
+            </button>
+            <button
+              onClick={() => setFilterPeriod('today')}
+              className={`px-4 py-2 rounded-xl text-xs font-medium transition-all ${
+                filterPeriod === 'today' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200/50'
+              }`}
+            >
+              Vence Hoje
+            </button>
+            <button
+              onClick={() => setFilterPeriod('week')}
+              className={`px-4 py-2 rounded-xl text-xs font-medium transition-all ${
+                filterPeriod === 'week' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200/50'
+              }`}
+            >
+              Próximos 7 Dias
+            </button>
+            <button
+              onClick={() => setFilterPeriod('month')}
+              className={`px-4 py-2 rounded-xl text-xs font-medium transition-all ${
+                filterPeriod === 'month' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200/50'
+              }`}
+            >
+              Próximos 30 Dias
+            </button>
+          </div>
 
-            return (
-              <div key={comm.id} className="p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4 hover:bg-slate-50/40 transition-colors">
-                <div className="flex items-start space-x-3.5 min-w-0">
-                  <div className={`p-2.5 rounded-xl shrink-0 ${
-                    comm.status === 'paid' 
-                      ? 'bg-emerald-50 text-emerald-600' 
-                      : isOverdue 
-                        ? 'bg-rose-50 text-rose-600' 
-                        : 'bg-amber-50 text-amber-600'
-                  }`}>
-                    {comm.status === 'paid' ? <CheckCircle className="w-4.5 h-4.5" /> : <CalendarClock className="w-4.5 h-4.5" />}
-                  </div>
+          {/* Main Commitments List */}
+          {filteredCommitments.length === 0 ? (
+            <div id="comm-empty-state" className="bg-white border border-slate-100 rounded-2xl p-12 text-center shadow-sm">
+              <CalendarClock className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+              <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">Nenhum compromisso agendado</h3>
+              <p className="text-slate-500 text-xs mt-1.5 max-w-sm mx-auto">
+                Não existem faturas, boletos ou cobranças pendentes de liquidação para este período.
+              </p>
+              <button
+                onClick={() => setShowForm(true)}
+                className="mt-4 px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-semibold hover:bg-slate-800 transition-colors"
+              >
+                Agendar Novo Lançamento Futuro
+              </button>
+            </div>
+          ) : (
+            <div id="commitments-list-container" className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden divide-y divide-slate-100">
+              {filteredCommitments.map(comm => {
+                const isOverdue = comm.status === 'pending' && comm.due_date < new Date().toISOString().split('T')[0];
+                const respUser = users.find(u => u.id === comm.responsible_user_id)?.name;
+                const estAccName = accounts.find(a => a.id === comm.estimated_account_id)?.name;
 
-                  <div className="min-w-0">
-                    <div className="flex items-center space-x-2">
-                      <h4 className="text-xs font-bold text-slate-900 truncate leading-snug">{comm.description}</h4>
-                      {comm.status === 'paid' ? (
-                        <span className="bg-emerald-100 text-emerald-800 text-[9px] px-2 py-0.5 rounded-full font-mono uppercase font-bold">Liquidado</span>
-                      ) : isOverdue ? (
-                        <span className="bg-rose-100 text-rose-800 text-[9px] px-2 py-0.5 rounded-full font-mono uppercase font-bold">Atrasado</span>
-                      ) : (
-                        <span className="bg-slate-100 text-slate-800 text-[9px] px-2 py-0.5 rounded-full font-mono uppercase font-bold">Pendente</span>
-                      )}
+                return (
+                  <div key={comm.id} className="p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4 hover:bg-slate-50/40 transition-colors">
+                    <div className="flex items-start space-x-3.5 min-w-0">
+                      <div className={`p-2.5 rounded-xl shrink-0 ${
+                        comm.status === 'paid' 
+                          ? 'bg-emerald-50 text-emerald-600' 
+                          : isOverdue 
+                            ? 'bg-rose-50 text-rose-600' 
+                            : 'bg-amber-50 text-amber-600'
+                      }`}>
+                        {comm.status === 'paid' ? <CheckCircle className="w-4.5 h-4.5" /> : <CalendarClock className="w-4.5 h-4.5" />}
+                      </div>
+
+                      <div className="min-w-0">
+                        <div className="flex items-center space-x-2">
+                          <h4 className="text-xs font-bold text-slate-900 truncate leading-snug">{comm.description}</h4>
+                          {comm.status === 'paid' ? (
+                            <span className="bg-emerald-100 text-emerald-800 text-[9px] px-2 py-0.5 rounded-full font-mono uppercase font-bold">Liquidado</span>
+                          ) : isOverdue ? (
+                            <span className="bg-rose-100 text-rose-800 text-[9px] px-2 py-0.5 rounded-full font-mono uppercase font-bold">Atrasado</span>
+                          ) : (
+                            <span className="bg-slate-100 text-slate-800 text-[9px] px-2 py-0.5 rounded-full font-mono uppercase font-bold">Pendente</span>
+                          )}
+                        </div>
+                        <p className="text-[10px] text-slate-500 font-mono mt-1 leading-relaxed">
+                          Vencimento: <strong className={isOverdue ? "text-rose-600 font-bold" : "font-semibold text-slate-700"}>{formatDate(comm.due_date)}</strong>
+                          {respUser && ` • Responsável: ${respUser}`}
+                          {estAccName && ` • Estimado via: ${estAccName}`}
+                        </p>
+                        {comm.notes && (
+                          <p className="text-[9px] text-slate-400 italic font-mono mt-1">Obs: "{comm.notes}"</p>
+                        )}
+                      </div>
                     </div>
-                    <p className="text-[10px] text-slate-500 font-mono mt-1 leading-relaxed">
-                      Vencimento: <strong className={isOverdue ? "text-rose-600 font-bold" : "font-semibold text-slate-700"}>{formatDate(comm.due_date)}</strong>
-                      {respUser && ` • Responsável: ${respUser}`}
-                      {estAccName && ` • Estimado via: ${estAccName}`}
-                    </p>
-                    {comm.notes && (
-                      <p className="text-[9px] text-slate-400 italic font-mono mt-1">Obs: "{comm.notes}"</p>
-                    )}
-                  </div>
-                </div>
 
-                <div className="flex items-center justify-between md:justify-end gap-4 shrink-0 border-t md:border-t-0 pt-3 md:pt-0 border-slate-100">
-                  <div className="text-left md:text-right">
-                    <span className="text-[10px] text-slate-400 uppercase tracking-wider font-mono block">Valor Estimado</span>
-                    <span className="text-xs font-bold text-slate-900 font-mono">{formatCurrency(comm.estimated_amount)}</span>
-                  </div>
+                    <div className="flex items-center justify-between md:justify-end gap-4 shrink-0 border-t md:border-t-0 pt-3 md:pt-0 border-slate-100">
+                      <div className="text-left md:text-right">
+                        <span className="text-[10px] text-slate-400 uppercase tracking-wider font-mono block">Valor Estimado</span>
+                        <span className="text-xs font-bold text-slate-900 font-mono">{formatCurrency(comm.estimated_amount)}</span>
+                      </div>
 
-                  {comm.status === 'pending' && (
-                    <button
-                      id={`pay-commitment-${comm.id}`}
-                      onClick={() => startPayment(comm)}
-                      className="px-3.5 py-1.5 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 transition-colors shadow-sm"
-                    >
-                      Quitar
-                    </button>
-                  )}
+                      {comm.status === 'pending' && (
+                        <button
+                          id={`pay-commitment-${comm.id}`}
+                          onClick={() => startPayment(comm)}
+                          className="px-3.5 py-1.5 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 transition-colors shadow-sm"
+                        >
+                          Quitar
+                        </button>
+                      )}
 
-                  <div className="flex items-center space-x-1 pl-2 border-l border-slate-100">
-                    <button
-                      onClick={() => handleStartEdit(comm)}
-                      className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
-                      title="Editar compromisso"
-                    >
-                      <Pencil className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={() => setDeletingCommitment(comm)}
-                      className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                      title="Excluir compromisso"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                      <div className="flex items-center space-x-1 pl-2 border-l border-slate-100">
+                        <button
+                          onClick={() => handleStartEdit(comm)}
+                          className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+                          title="Editar compromisso"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => setDeletingCommitment(comm)}
+                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                          title="Excluir compromisso"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+                );
+              })}
+            </div>
+          )}
+        </>
       )}
 
       {/* Assisted Payment Overlay Modal (No horizontal scroll, fully centered, desktop & mobile optimized) */}
